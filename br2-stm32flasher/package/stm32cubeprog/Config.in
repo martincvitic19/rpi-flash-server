@@ -1,0 +1,8 @@
+config BR2_PACKAGE_STM32CUBEPROG
+	bool "stm32cubeprog"
+	depends on BR2_aarch64
+	select BR2_PACKAGE_LIBUSB
+	help
+	  STMicroelectronics STM32CubeProgrammer CLI (Linux Arm64 package).
+	  The .deb.zip must be placed in BR2_DL_DIR/stm32cubeprog manually
+	  (download requires a myST login).

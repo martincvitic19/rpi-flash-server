@@ -1,0 +1,7 @@
+config BR2_PACKAGE_RPI4_BOOTFW
+	bool "rpi4-bootfw"
+	depends on BR2_aarch64
+	help
+	  Raspberry Pi 4 GPU boot firmware (start4.elf, fixup4.dat),
+	  pinned to one commit of github.com/raspberrypi/firmware.
+	  Installed into the images directory for the boot partition.

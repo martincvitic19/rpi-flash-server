@@ -1,0 +1,1 @@
+stm32 -1 stm32 -1 =stm32 /home/stm32 /bin/sh - STM32 flasher user

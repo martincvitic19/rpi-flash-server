@@ -1,0 +1,2 @@
+name: STM32FLASHER
+desc: Raspberry Pi 4 image that flashes several STM32 boards in parallel

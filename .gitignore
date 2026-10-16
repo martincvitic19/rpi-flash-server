@@ -1,0 +1,12 @@
+# downloads and build output
+/dl/
+/output/
+/release/
+/buildroot-*/
+/armgcc/
+/firmware/out*/
+/logs/
+
+# local only: SSH keys baked into the image, personal helper
+/keys/
+/tx.sh

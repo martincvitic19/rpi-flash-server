@@ -1,0 +1,116 @@
+#!/bin/sh
+# flash-all: program every attached STM32 board in parallel with the
+# breathing-LED blinky that matches its MCU (picked by device ID), using
+# STM32CubeProgrammer over ST-LINK and/or SEGGER J-Link probes.
+#
+#   flash-all              all probes (ST-LINK + J-Link)
+#   flash-all -p stlink    only ST-LINK probes
+#   flash-all -p jlink     only J-Link probes
+#   flash-all -l           only list probes and detected MCUs
+#   flash-all -b DIR       take the blinky binaries from DIR
+#                          (/usr/share/stm32-blinky-2x = twice the frequency)
+
+BIN_DIR=/usr/share/stm32-blinky
+CUBE=/opt/stm32cubeprog/bin/STM32_Programmer_CLI
+LOG_DIR=/tmp/flash-all
+export LC_ALL=en_US.UTF-8   # Qt inside STM32CubeProgrammer wants a UTF-8 locale
+PROBES=all
+LIST_ONLY=0
+
+while getopts "p:b:lh" o; do
+	case $o in
+	p) PROBES=$OPTARG ;;
+	b) BIN_DIR=$OPTARG ;;
+	l) LIST_ONLY=1 ;;
+	*) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	esac
+done
+case $PROBES in all|stlink|jlink) ;; *) echo "-p must be stlink, jlink or all"; exit 1 ;; esac
+case $BIN_DIR in /*) ;; *) BIN_DIR=$PWD/$BIN_DIR ;; esac
+[ -x "$CUBE" ] || { echo "STM32CubeProgrammer not found at $CUBE"; exit 1; }
+
+# device ID -> "binary|description"
+board_for_id() {
+	case $(printf '0x%03x' "$(($1 & 0xfff))") in
+	0x413) echo "blinky_f407disco.bin|STM32F405/407 (F4 Discovery, LD4 green PD12)" ;;
+	0x422) echo "blinky_f3disco.bin|STM32F303xB/C (F3 Discovery, LD7 green PE11)" ;;
+	0x415) echo "blinky_l4nucleo64.bin|STM32L47x/L48x (Nucleo-64, LD2 PA5)" ;;
+	0x462) echo "blinky_l4nucleo64.bin|STM32L45x/L46x (Nucleo-64, LD2 PA5)" ;;
+	0x435) echo "blinky_l4nucleo32.bin|STM32L43x/L44x (Nucleo-32, LD3 PB3)" ;;
+	0x464) echo "blinky_l4nucleo32.bin|STM32L41x/L42x (Nucleo-32, LD3 PB3)" ;;
+	0x453|0x493|0x44c|0x44d) echo "blinky_c0nucleo.bin|STM32C0 (Nucleo, LED PA5)" ;;
+	*) return 1 ;;
+	esac
+}
+
+# Print "<type> <serial>" for every probe. CubeProgrammer output is
+# ANSI-coloured and may list a probe more than once.
+list_probes() {
+	if [ "$PROBES" != jlink ]; then
+		"$CUBE" -l stlink-only 2>/dev/null | awk '/ST-LINK SN/ && match($0, /: *[0-9A-Fa-f]+/) {
+			s = substr($0, RSTART, RLENGTH); gsub(/[: ]/, "", s); if (!seen[s]++) print "stlink", s }'
+	fi
+	if [ "$PROBES" != stlink ]; then
+		"$CUBE" -l jlink-only 2>/dev/null | awk '/(SN|S\/N|[Ss]erial)[^:]*: *[0-9]+/ && match($0, /: *[0-9]+/) {
+			s = substr($0, RSTART, RLENGTH); gsub(/[: ]/, "", s); if (!seen[s]++) print "jlink", s }'
+	fi
+}
+
+connect_args() { # type serial
+	case $1 in
+	stlink) echo "port=SWD sn=$2 mode=UR" ;;
+	jlink)  echo "port=JLINK sn=$2" ;;
+	esac
+}
+
+chip_id() { # type serial -> device ID (hex)
+	"$CUBE" -c $(connect_args "$1" "$2") 2>/dev/null | awk '/Device ID/ && match($0, /0x[0-9A-Fa-f]+/) {
+		print substr($0, RSTART, RLENGTH); exit }'
+}
+
+rm -rf "$LOG_DIR"; mkdir -p "$LOG_DIR"; cd "$LOG_DIR" || exit 1
+PROBE_LIST=$(list_probes)
+[ -n "$PROBE_LIST" ] || { echo "No ST-LINK/J-Link probes found"; exit 1; }
+
+n=0
+echo "$PROBE_LIST" > "$LOG_DIR/probes"
+while read -r type sn; do
+	id=$(chip_id "$type" "$sn" < /dev/null)
+	if [ -z "$id" ] || ! info=$(board_for_id "$id"); then
+		echo "[$type $sn] unknown or unreachable target (device ID '${id:-none}'), skipped"
+		continue
+	fi
+	bin=$BIN_DIR/${info%%|*}
+	echo "[$type $sn] $id ${info#*|} -> $(basename "$bin")"
+	[ $LIST_ONLY = 1 ] && continue
+	[ -f "$bin" ] || { echo "  missing $bin, skipped"; continue; }
+	n=$((n + 1))
+	: > "$LOG_DIR/$sn.log"
+	( "$CUBE" -c $(connect_args "$type" "$sn") -d "$bin" 0x08000000 -v -rst >> "$LOG_DIR/$sn.log" 2>&1
+	  echo $? > "$LOG_DIR/$sn.rc" ) < /dev/null &
+	basename "$bin" .bin | sed 's/^blinky_//' > "$LOG_DIR/$sn.tag"
+	echo "$type" > "$LOG_DIR/$sn.type"
+done < "$LOG_DIR/probes"
+[ $LIST_ONLY = 1 ] && { rm -f /SEGGER_REG_HKEY_*.xml; exit 0; }
+[ $n -gt 0 ] || exit 1
+
+echo "Flashing $n board(s) in parallel..."
+# live progress: every board's log, prefixed with its name
+for f in "$LOG_DIR"/*.tag; do
+	sn=$(basename "$f" .tag); tag=$(cat "$f")
+	{ tail -n +1 -f "$LOG_DIR/$sn.log" 2>/dev/null & echo $! > "$LOG_DIR/$sn.tailpid"; wait; } | tr '\r' '\n' | tr -d '\033' |
+		awk -v t="$tag" '{ gsub(/\[[0-9;]*m/, "") } /[^ ]/ { printf "[%s] %s\n", t, $0; fflush() }' &
+done
+while [ "$(ls "$LOG_DIR"/*.rc 2>/dev/null | wc -l)" -lt $n ]; do sleep 0.5; done
+sleep 0.5; kill $(cat "$LOG_DIR"/*.tailpid) 2>/dev/null; wait
+rm -f /SEGGER_REG_HKEY_*.xml   # the J-Link library leaves its "registry" in /
+
+echo
+echo "===== summary ====="
+fail=0
+for f in "$LOG_DIR"/*.tag; do
+	sn=$(basename "$f" .tag)
+	if [ "$(cat "$LOG_DIR/$sn.rc")" = 0 ]; then r=OK; else r=FAILED; fail=1; fi
+	printf '%-12s %-7s %-26s %s\n' "$(cat "$f")" "$(cat "$LOG_DIR/$sn.type")" "$sn" "$r"
+done
+exit $fail

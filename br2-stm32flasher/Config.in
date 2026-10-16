@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_STM32FLASHER_PATH/package/rpi4-bootfw/Config.in"
+source "$BR2_EXTERNAL_STM32FLASHER_PATH/package/stm32cubeprog/Config.in"
