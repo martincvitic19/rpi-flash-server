@@ -20,7 +20,10 @@ BR_MAKE := env -u LD_LIBRARY_PATH $(MAKE) -C $(CURDIR)/output
 
 all: image
 
+# Use an installed arm-none-eabi-gcc, otherwise build one into armgcc/
 firmware:
+	@command -v arm-none-eabi-gcc >/dev/null || [ -x armgcc/install/bin/arm-none-eabi-gcc ] || \
+		{ echo "arm-none-eabi-gcc not found, building it (tools/build-arm-toolchain.sh)"; tools/build-arm-toolchain.sh; }
 	$(MAKE) -C firmware
 	$(MAKE) -C firmware PERIOD_MS=1000 OUT=out-2x
 

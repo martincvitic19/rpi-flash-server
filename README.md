@@ -217,8 +217,9 @@ entry in `firmware/Makefile`, and its device ID in `board_for_id()` in `flash-al
   sudo apt install build-essential git rsync bc cpio unzip file wget curl python3 \
        libncurses-dev xz-utils gcc-arm-none-eabi
   ```
-  `gcc-arm-none-eabi` builds the blinky firmware. Without it, run
-  `tools/build-arm-toolchain.sh`, which builds a toolchain into `armgcc/`.
+  `gcc-arm-none-eabi` builds the blinky firmware. If it is not installed,
+  `make` runs `tools/build-arm-toolchain.sh` automatically. That builds a
+  toolchain into `armgcc/` (about 15 min, once).
 - **STM32CubeProgrammer 2.23.0 for Linux ARM64.** ST's download needs a free
   myST login, so it is not fetched automatically. Download *STM32CubeProgrammer
   — Linux ARM64* from
