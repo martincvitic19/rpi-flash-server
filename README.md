@@ -24,10 +24,10 @@ Tested with one board per USB port:
 
 | Board | MCU | Device ID | LED | Demo binary |
 |---|---|---|---|---|
-| STM32F407G-DISC1 (F4 Discovery) | STM32F407VG | 0x413 | LD4 green, PD12 (TIM4_CH1) | `blinky_f407disco.bin` |
-| STM32F3DISCOVERY | STM32F303VC | 0x422 | LD7 green, PE11 (TIM1_CH2) | `blinky_f3disco.bin` |
-| NUCLEO-L476RG | STM32L476RG | 0x415 | LD2 green, PA5 (TIM2_CH1) | `blinky_l4nucleo64.bin` |
-| NUCLEO-C031C6 | STM32C031C6 | 0x453 | LD4 green, PA5 (TIM3) | `blinky_c0nucleo.bin` |
+| STM32F407G-DISC1 (F4 Discovery) | STM32F407VG | 0x413 | LD4 green, PD12 (TIM4_CH1) | `f4discovery_pwm_blinky.bin` |
+| STM32F3DISCOVERY | STM32F303VC | 0x422 | LD7 green, PE11 (TIM1_CH2) | `f3discovery_pwm_blinky.bin` |
+| NUCLEO-L476RG | STM32L476RG | 0x415 | LD2 green, PA5 (TIM2_CH1) | `nucleol476rg_pwm_blinky.bin` |
+| NUCLEO-C031C6 | STM32C031C6 | 0x453 | LD4 green, PA5 (TIM3) | `nucleoc031c6_pwm_blinky.bin` |
 
 `STM32_Programmer_CLI` itself works with any STM32 it supports. `flash-all`
 also recognises STM32L45x/L46x (0x462), L41x–L44x Nucleo-32 boards (0x464,
@@ -80,18 +80,10 @@ make
 | `make` | firmware + image |
 | `make firmware` | only the demo binaries (`firmware/out/`, `firmware/out-2x/`) |
 | `make menuconfig` | Buildroot configuration; then `make savedefconfig` to store it |
-| `make release` | `release/`: `stm32flasher-rpi4-sdcard.img.xz`, `.img.bmap`, `SHA256SUMS` |
 | `make clean` / `make distclean` | remove build output / also Buildroot and the local toolchain |
 
 After changing only the overlay (e.g. `flash-all`) or the firmware, `make`
 takes about a minute.
-
-### Making a release
-
-Build without personal keys (`mv keys keys.off`), run `make release`, then on
-<https://github.com/martincvitic19/rpi-flash-server/releases/new> create a tag
-(e.g. `v1.0`) and attach the three files from `release/`. See
-[License](#license) for what the image contains.
 
 ### Repository layout
 
@@ -167,17 +159,37 @@ The shell is BusyBox (`ls`, `cat`, `vi`, `ps`, `dmesg`, `lsusb`, …).
 
 ### Transferring binaries to be flashed using scp
 
-The Pi runs dropbear, which has no SFTP server, so use `scp -O` (the classic
-scp protocol; recent OpenSSH uses SFTP by default):
+The demo firmware is built on the PC into `firmware/out/` (2 s breathing
+period) and `firmware/out-2x/` (1 s), one PWM blinky per board:
+
+| Board | Binary |
+|---|---|
+| STM32F407G-DISC1 | `f4discovery_pwm_blinky.bin` |
+| STM32F3DISCOVERY | `f3discovery_pwm_blinky.bin` |
+| NUCLEO-L476RG | `nucleol476rg_pwm_blinky.bin` |
+| NUCLEO-C031C6 | `nucleoc031c6_pwm_blinky.bin` |
+| NUCLEO-L432KC (untested) | `nucleol432kc_pwm_blinky.bin` |
+
+(`.elf` files with the same names are next to them. To get the binaries
+without building the image: `make firmware`.)
+
+Copy them to the Pi. The Pi runs dropbear, which has no SFTP server, so use
+`scp -O` (the classic scp protocol; recent OpenSSH uses SFTP by default):
 
 ```sh
 ssh root@192.168.8.1 mkdir -p fw
-scp -O build/app.elf root@192.168.8.1:fw/
-scp -O f4.hex l4.bin c0.elf root@192.168.8.1:fw/
+scp -O firmware/out/*_pwm_blinky.bin root@192.168.8.1:fw/
 ```
 
-`STM32_Programmer_CLI` takes `.elf`, `.hex`, `.srec` and `.bin`. The root
-filesystem is writable, so files in `~/fw` stay there across reboots.
+Check on the Pi that they arrived:
+
+```sh
+ssh root@192.168.8.1
+ls -l fw/
+```
+
+`STM32_Programmer_CLI` takes `.elf`, `.hex`, `.srec` and `.bin` files. The
+root filesystem is writable, so files in `~/fw` stay there across reboots.
 
 ### Probing connected devices
 
@@ -204,8 +216,8 @@ STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN>
 device ID, board and the image it would flash:
 
 ```
-[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> /usr/share/stm32-blinky/blinky_f407disco.bin
-[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> /usr/share/stm32-blinky/blinky_f3disco.bin
+[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> /usr/share/stm32-blinky/f4discovery_pwm_blinky.bin
+[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> /usr/share/stm32-blinky/f3discovery_pwm_blinky.bin
 ```
 
 With two identical boards, unplug one and run `STM32_Programmer_CLI -l` again
@@ -213,17 +225,27 @@ to see which serial belongs to which board.
 
 ### Flashing individual images to devices
 
-With `STM32_Programmer_CLI`: `-c` selects the probe, `-d` downloads, `-v`
-verifies and `-rst` resets the MCU so the new firmware starts. `mode=UR`
-connects under reset, which works even if the running firmware disabled SWD.
-`.elf`, `.hex` and `.srec` carry their own addresses; a `.bin` needs the
-address after it.
+With `STM32_Programmer_CLI`: `-c` selects the probe by its serial, `-d`
+downloads, `-v` verifies and `-rst` resets the MCU so the new firmware starts.
+`mode=UR` connects under reset, which works even if the running firmware
+disabled SWD. A `.bin` needs the flash address after it (`0x08000000` on all
+these boards); `.elf`, `.hex` and `.srec` carry their own addresses.
 
 ```sh
-STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/app.elf -v -rst
-STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/app.bin 0x08000000 -v -rst
-STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN> -d fw/app.hex -v -rst
+STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/f4discovery_pwm_blinky.bin 0x08000000 -v -rst
 ```
+
+The output ends with `Download verified successfully` and the board's LED
+starts breathing. The same for the other boards (use your serials from
+`STM32_Programmer_CLI -l`):
+
+```sh
+STM32_Programmer_CLI -c port=SWD sn=066CFF494877514867173517 mode=UR -d fw/f3discovery_pwm_blinky.bin 0x08000000 -v -rst
+STM32_Programmer_CLI -c port=SWD sn=066EFF3234584D3043012451 mode=UR -d fw/nucleol476rg_pwm_blinky.bin 0x08000000 -v -rst
+STM32_Programmer_CLI -c port=SWD sn=066EFF35314B4E3043195329 mode=UR -d fw/nucleoc031c6_pwm_blinky.bin 0x08000000 -v -rst
+```
+
+With a J-Link instead of an ST-LINK: `-c port=JLINK sn=<J-Link SN>`.
 
 Other useful commands:
 
@@ -238,61 +260,63 @@ STM32_Programmer_CLI --help
 The same with `flash-all`:
 
 ```sh
-flash-all -f fw/app.elf -s 066BFF575377524867071643   # one probe
-flash-all -f fw/app.elf -t f407disco                  # every board of that type
+flash-all -f fw/f4discovery_pwm_blinky.bin -s 066BFF575377524867071643   # one probe
+flash-all -f fw/f4discovery_pwm_blinky.bin -t f4discovery                # every board of that type
 ```
 
-Board names: `f407disco`, `f3disco`, `l4nucleo64`, `l4nucleo32`, `c0nucleo`.
+Board names: `f4discovery`, `f3discovery`, `nucleol476rg`, `nucleol432kc`,
+`nucleoc031c6`.
 
 ### Flashing all connected devices
 
-`STM32_Programmer_CLI` handles one probe per process, so run one per board in
-the background and wait for all of them:
+`STM32_Programmer_CLI` handles one probe per process, so start one per board
+in the background and wait for all of them:
 
 ```sh
-STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/f4.elf -v -rst > f4.log 2>&1 &
-STM32_Programmer_CLI -c port=SWD sn=066CFF494877514867173517 mode=UR -d fw/f3.hex -v -rst > f3.log 2>&1 &
-STM32_Programmer_CLI -c port=SWD sn=066EFF3234584D3043012451 mode=UR -d fw/l4.bin 0x08000000 -v -rst > l4.log 2>&1 &
-STM32_Programmer_CLI -c port=SWD sn=066EFF35314B4E3043195329 mode=UR -d fw/c0.bin 0x08000000 -v -rst > c0.log 2>&1 &
-wait; grep -l "verified successfully" *.log
+cd ~/fw
+STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d f4discovery_pwm_blinky.bin 0x08000000 -v -rst > f4.log 2>&1 &
+STM32_Programmer_CLI -c port=SWD sn=066CFF494877514867173517 mode=UR -d f3discovery_pwm_blinky.bin 0x08000000 -v -rst > f3.log 2>&1 &
+STM32_Programmer_CLI -c port=SWD sn=066EFF3234584D3043012451 mode=UR -d nucleol476rg_pwm_blinky.bin 0x08000000 -v -rst > l4.log 2>&1 &
+STM32_Programmer_CLI -c port=SWD sn=066EFF35314B4E3043195329 mode=UR -d nucleoc031c6_pwm_blinky.bin 0x08000000 -v -rst > c0.log 2>&1 &
+wait; grep -c "verified successfully" *.log
 ```
 
-`flash-all` does exactly that for every probe it finds: it reads each MCU's
-device ID, picks the matching image, starts all downloads at once, shows the
-progress of every board prefixed with its name and ends with a summary. The
-exit code is non-zero if any board failed. Logs are in
+All LEDs then breathe with the same rhythm.
+
+`flash-all` does the same without typing serials: it finds every probe, reads
+each MCU's device ID, picks the matching image, starts all downloads at once,
+shows each board's progress prefixed with its name and ends with a summary.
+The exit code is non-zero if any board failed; logs are in
 `/tmp/flash-all-<uid>/<serial>.log`.
 
 ```sh
-flash-all                                  # demo blinky on every board
+flash-all -b fw                            # the binaries you copied to ~/fw
+flash-all                                  # demo blinky built into the image
 flash-all -b /usr/share/stm32-blinky-2x    # demo blinky, twice the frequency
-flash-all -b fw                            # your images from ~/fw
 flash-all -p stlink                        # only ST-LINK probes (or -p jlink)
 flash-all -h                               # all options
 ```
 
-With `-b DIR`, each board gets the first match of `DIR/<probe serial>.<ext>`,
-`DIR/<board>.<ext>` (ext = `elf`, `hex`, `srec` or `bin`) or
-`DIR/blinky_<board>.bin`. Boards without a match are skipped, and so is a board
-whose name exists in more than one format. `.bin` files go to `0x08000000`
-(change with `-a ADDR`). For example:
-
-```sh
-scp -O f4.elf root@192.168.8.1:fw/f407disco.elf
-scp -O l4.bin root@192.168.8.1:fw/l4nucleo64.bin
-scp -O c0.hex root@192.168.8.1:fw/066EFF35314B4E3043195329.hex
-ssh root@192.168.8.1 flash-all -b fw
 ```
-
-```
-Flashing 3 board(s) in parallel...
-[f407disco] Download verified successfully
+[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> /root/fw/f3discovery_pwm_blinky.bin
+[stlink 066EFF35314B4E3043195329] 0x453 STM32C0 (Nucleo, LED PA5) -> /root/fw/nucleoc031c6_pwm_blinky.bin
+[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> /root/fw/f4discovery_pwm_blinky.bin
+[stlink 066EFF3234584D3043012451] 0x415 STM32L47x/L48x (Nucleo-64, LD2 PA5) -> /root/fw/nucleol476rg_pwm_blinky.bin
+Flashing 4 board(s) in parallel...
+[f4discovery] Download verified successfully
 ...
 ===== summary =====
-f407disco   stlink  066BFF575377524867071643  f407disco.elf                  OK
-l4nucleo64  stlink  066EFF3234584D3043012451  l4nucleo64.bin                 OK
-c0nucleo    stlink  066EFF35314B4E3043195329  066EFF35314B4E3043195329.hex   OK
+f4discovery  stlink  066BFF575377524867071643  f4discovery_pwm_blinky.bin     OK
+f3discovery  stlink  066CFF494877514867173517  f3discovery_pwm_blinky.bin     OK
+nucleol476rg stlink  066EFF3234584D3043012451  nucleol476rg_pwm_blinky.bin    OK
+nucleoc031c6 stlink  066EFF35314B4E3043195329  nucleoc031c6_pwm_blinky.bin    OK
 ```
+
+With `-b DIR`, each board gets the first match of `DIR/<probe serial>.<ext>`,
+`DIR/<board>.<ext>` or `DIR/<board>_pwm_blinky.<ext>` (ext = `elf`, `hex`,
+`srec` or `bin`). Boards without a match are skipped, and so is a board whose
+name exists in more than one format. `.bin` files go to `0x08000000` (change
+with `-a ADDR`).
 
 If a board shows `unknown or unreachable target`, check its USB cable and
 jumpers (Nucleo: both CN2 jumpers on). `No ST-LINK/J-Link probes found` means
