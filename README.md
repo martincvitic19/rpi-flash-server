@@ -253,7 +253,7 @@ entry in `firmware/Makefile`, and its device ID in `board_for_id()` in `flash-al
 ### Build
 
 ```sh
-git clone <this repo> stm32flasher && cd stm32flasher
+git clone https://github.com/martincvitic19/rpi-flash-server.git && cd rpi-flash-server
 mkdir -p dl/cubeprog && cp ~/Downloads/stm32cubeprogrammer_2.23.0_arm64.deb.zip dl/cubeprog/
 # optional: SSH public keys for root and the stm32 user
 mkdir -p keys && cat ~/.ssh/id_ed25519.pub > keys/authorized_keys
