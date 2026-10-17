@@ -1,4 +1,4 @@
-# rpi-flash-server — parallel STM32 flasher on a Raspberry Pi 4
+# rpi-flash-server — flash multiple STM32 devices simultaneously
 
 ## Overview
 
@@ -159,14 +159,6 @@ STM32_Programmer_CLI -l jlink-only
 cat /sys/bus/usb/devices/*/serial        # same serials, straight from USB
 ```
 
-To see which MCU is behind a probe, connect to it. The output shows
-`Device ID`, `Device name` and the flash size:
-
-```sh
-STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR
-STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN>
-```
-
 `flash-all -l` does all of this in one go and prints probe type, serial,
 device ID, board and the image it would flash:
 
@@ -264,9 +256,10 @@ https://github.com/user-attachments/assets/583356aa-8bc9-4474-a3e9-cf608219ec26
 
 ## License
 
-The code in this repository (Buildroot external tree, scripts)
-is released under the [MIT No Attribution](LICENSE) license (MIT-0): use it
-for anything, no attribution required.
+The code in this repository (Buildroot external tree, scripts) is
+Copyright (C) 2026 Martin Cvitic and released under the
+[GNU General Public License, version 2](LICENSE) or (at your option) any later
+version (GPL-2.0-or-later), the same license as Buildroot.
 
 The image built from it contains third-party software under its own licenses:
 
