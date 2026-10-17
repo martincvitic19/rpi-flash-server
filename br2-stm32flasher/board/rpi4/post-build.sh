@@ -1,15 +1,8 @@
 #!/bin/sh
-# Install the blinky binaries and (optionally) SSH public keys into the target
+# Install (optional) SSH public keys and the README into the target
 set -e
 BOARD_DIR="$(dirname "$0")"
 TOP="$BOARD_DIR/../../.."
-
-for set in "" "-2x"; do
-	src="$TOP/firmware/out$set"
-	ls "$src"/*.bin >/dev/null 2>&1 || { echo "post-build: no binaries in $src, run 'make firmware' first" >&2; exit 1; }
-	mkdir -p "$TARGET_DIR/usr/share/stm32-blinky$set"
-	cp "$src"/*.bin "$TARGET_DIR/usr/share/stm32-blinky$set/"
-done
 
 # keys/authorized_keys is not in git; without it only password login works
 rm -rf "$TARGET_DIR/root/.ssh" "$TARGET_DIR/home/stm32/.ssh"

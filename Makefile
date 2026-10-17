@@ -1,11 +1,9 @@
 # Top-level build for the STM32 parallel flasher image (Raspberry Pi 4).
 #
-#   make            firmware + Buildroot image -> output/images/sdcard.img
-#   make firmware   only the blinky binaries
-#   make image      only the Buildroot image (needs firmware)
+#   make            Buildroot image -> output/images/sdcard.img (+ .bmap)
 #   make menuconfig Buildroot menuconfig on the project config
 #   make release    compressed image + bmap + checksums in release/
-#   make clean      remove Buildroot output and firmware builds
+#   make clean      remove Buildroot output and release/
 
 BR_VERSION   := 2026.02.3
 BR_DIR       := buildroot-$(BR_VERSION)
@@ -16,16 +14,9 @@ DEFCONFIG    := rpi4_stm32flasher_defconfig
 # Buildroot refuses to run with a LD_LIBRARY_PATH containing "." or an empty entry
 BR_MAKE := env -u LD_LIBRARY_PATH $(MAKE) -C $(CURDIR)/output
 
-.PHONY: all firmware image menuconfig savedefconfig release clean distclean
+.PHONY: all image menuconfig savedefconfig release clean distclean
 
 all: image
-
-# Use an installed arm-none-eabi-gcc, otherwise build one into armgcc/
-firmware:
-	@command -v arm-none-eabi-gcc >/dev/null || [ -x armgcc/install/bin/arm-none-eabi-gcc ] || \
-		{ echo "arm-none-eabi-gcc not found, building it (tools/build-arm-toolchain.sh)"; tools/build-arm-toolchain.sh; }
-	$(MAKE) -C firmware
-	$(MAKE) -C firmware PERIOD_MS=1000 OUT=out-2x
 
 $(BR_TARBALL):
 	mkdir -p dl
@@ -45,7 +36,7 @@ $(CUBEPROG_ZIP):
 output/.config: $(BR_DIR)/Makefile br2-stm32flasher/configs/$(DEFCONFIG)
 	env -u LD_LIBRARY_PATH $(MAKE) -C $(BR_DIR) BR2_EXTERNAL=$(CURDIR)/br2-stm32flasher O=$(CURDIR)/output $(DEFCONFIG)
 
-image: firmware $(CUBEPROG_ZIP) output/.config
+image: $(CUBEPROG_ZIP) output/.config
 	$(BR_MAKE)
 	@echo; echo "Image: output/images/sdcard.img (+ .bmap), write it with: sudo bmaptool copy output/images/sdcard.img /dev/sdX"
 
@@ -64,7 +55,6 @@ release: image
 
 clean:
 	rm -rf output release
-	$(MAKE) -C firmware clean
 
 distclean: clean
-	rm -rf $(BR_DIR) armgcc
+	rm -rf $(BR_DIR)

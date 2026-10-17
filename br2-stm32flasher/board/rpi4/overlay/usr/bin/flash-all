@@ -3,12 +3,11 @@
 # STM32CubeProgrammer over ST-LINK and/or SEGGER J-Link probes. Each board
 # gets the image that matches its MCU (picked by device ID).
 #
-#   flash-all              built-in breathing-LED blinky on every board
-#   flash-all -b DIR       take images from DIR (e.g. ~/fw after an upload);
-#                          per board the first match wins:
+#   flash-all              images from ~/fw (copy them there with scp -O)
+#   flash-all -b DIR       images from DIR instead; per board the first
+#                          match wins:
 #                            <serial>.{elf,hex,srec,bin}
 #                            <board>.{elf,hex,srec,bin}
-#                            <board>_pwm_blinky.{elf,hex,srec,bin}
 #   flash-all -f FILE -t BOARD   flash FILE on every board of that type
 #   flash-all -f FILE -s SERIAL  flash FILE on one probe
 #   -t BOARD / -s SERIAL   only flash these boards (also without -f)
@@ -17,9 +16,8 @@
 #   -l                     only list probes, MCUs and the image each would get
 #
 # Boards: f4discovery f3discovery nucleol476rg nucleol432kc nucleoc031c6
-# Built-in images: /usr/share/stm32-blinky, /usr/share/stm32-blinky-2x
 
-BIN_DIR=/usr/share/stm32-blinky
+BIN_DIR=$HOME/fw
 CUBE=/opt/stm32cubeprog/bin/STM32_Programmer_CLI
 LOG_DIR=/tmp/flash-all-$(id -u)
 export LC_ALL=en_US.UTF-8   # Qt inside STM32CubeProgrammer wants a UTF-8 locale
@@ -30,7 +28,7 @@ ONLY_TAG=
 ONLY_SN=
 ADDR=0x08000000
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while getopts "p:b:f:t:s:a:lh" o; do
 	case $o in
@@ -72,7 +70,7 @@ board_for_id() {
 # image for a board: serial ; board -> path
 find_image() {
 	[ -n "$FILE" ] && { echo "$FILE"; return; }
-	for base in "$1" "$2" "$2_pwm_blinky"; do
+	for base in "$1" "$2"; do
 		img=$(ls "$BIN_DIR/$base".elf "$BIN_DIR/$base".hex "$BIN_DIR/$base".srec "$BIN_DIR/$base".bin 2>/dev/null)
 		case $(echo "$img" | grep -c .) in
 		0) ;;
