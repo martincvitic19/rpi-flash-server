@@ -116,27 +116,15 @@ exists in several formats (`f3disco.elf` and `f3disco.bin`), that board is
 skipped as ambiguous. The root filesystem is writable, so uploaded files stay
 across reboots.
 
-**From the PC, one command** (upload + flash, in the repo):
+**Upload from the PC** with `scp -O` (dropbear has no SFTP server; `-O`
+selects the classic scp protocol that recent OpenSSH no longer uses by default):
 
 ```sh
-tools/flash-remote.sh f407disco=build/f4/app.elf l4nucleo64=build/l4/app.bin
-tools/flash-remote.sh f3disco=app.hex -- -p jlink        # options after -- go to flash-all
-tools/flash-remote.sh 066BFF575377524867071643=app.elf   # by probe serial (see flash-all -l)
-tools/flash-remote.sh -H stm32@192.168.8.1 c0nucleo=app.bin
-```
-
-It replaces `~/fw` on the Pi with the given files, sets the Pi's clock from
-the PC (the Pi has no RTC or network time), and runs `flash-all -b fw`.
-
-**By hand** — any SSH file copy works (`scp`, `sftp`, FileZilla, sshfs, …):
-
-```sh
-scp app.elf stm32flasher:fw/f407disco.elf     # or root@192.168.8.1:fw/...
+ssh stm32flasher mkdir -p fw
+scp -O app.elf stm32flasher:fw/f407disco.elf     # or root@192.168.8.1:fw/...
 ssh stm32flasher flash-all -b fw
 ssh stm32flasher flash-all -f fw/f407disco.elf -t f407disco
 ```
-
-(On images built before the SFTP server was added, use `scp -O`.)
 
 Single board without the script:
 
@@ -186,7 +174,7 @@ home directory `/root` contains just this README.
 |---|---|
 | Boot | Raspberry Pi GPU firmware `start4.elf` / `fixup4.dat` (pinned commit), boots the kernel directly |
 | Kernel | mainline Linux 6.12.94, arm64 `defconfig`, Pi 4 USB/PCIe/Ethernet built in |
-| Userspace | glibc 2.42, BusyBox (init, mdev, shell), dropbear SSH, gesftpserver (SFTP for scp/sftp/sshfs) |
+| Userspace | glibc 2.42, BusyBox (init, mdev, shell), dropbear SSH |
 | STM32CubeProgrammer | v2.23.0 Linux ARM64 **CLI** (`STM32_Programmer_CLI`) in `/opt/stm32cubeprog`. ST ships no GUI for ARM; the bundled Qt6 libraries are non-GUI modules the CLI uses internally |
 | Probe support | ST-LINK/V2, V2-1, V3 (ST driver) and SEGGER J-Link (`libjlinkarm.so` from the ST package) |
 | Binaries | `/usr/share/stm32-blinky/` (2 s breathing period), `/usr/share/stm32-blinky-2x/` (1 s), your uploads in `~/fw/` |
@@ -335,7 +323,6 @@ firmware/                      blinky.c + Makefile
 tools/
   build-arm-toolchain.sh       builds arm-none-eabi-gcc if none is installed
   write-sd.sh                  writes the image to an SD card
-  flash-remote.sh              uploads your images to the Pi and flashes them
 ```
 
 Not in git (`.gitignore`): `dl/`, `output/`, `buildroot-*/`, `armgcc/`,
