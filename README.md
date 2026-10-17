@@ -9,6 +9,8 @@ SSH, copy your firmware to the Pi with `scp` and program the boards with the
 native **STM32CubeProgrammer** command-line tool, `STM32_Programmer_CLI`, one
 at a time or all at once.
 
+![Raspberry Pi 4 with STM32F4 Discovery, NUCLEO-L476RG, STM32F3 Discovery and NUCLEO-C031C6 connected over USB](docs/setup.jpg)
+
 What is in the image:
 
 | Part | Details |
@@ -321,6 +323,16 @@ with `-a ADDR`).
 If a board shows `unknown or unreachable target`, check its USB cable and
 jumpers (Nucleo: both CN2 jumpers on). `No ST-LINK/J-Link probes found` means
 `lsusb` on the Pi shows no `0483:374x` (ST-LINK) or `1366:xxxx` (J-Link) device.
+
+---
+
+## Demo
+
+Left: the PC copies the PWM blinky binaries to the Pi with `scp -O` and, over
+SSH, flashes all four boards in parallel. Right: the boards start breathing.
+Click the animation for the full video (41 s).
+
+[![Demo: copy the binaries with scp, flash all boards over SSH, LEDs start breathing](docs/demo.gif)](docs/demo.mp4)
 
 ---
 
