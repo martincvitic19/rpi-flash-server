@@ -330,9 +330,9 @@ jumpers (Nucleo: both CN2 jumpers on). `No ST-LINK/J-Link probes found` means
 
 Left: the PC copies the PWM blinky binaries to the Pi with `scp -O` and, over
 SSH, flashes all four boards in parallel. Right: the boards start breathing.
-Click the animation for the full video (41 s).
+Use the player's fullscreen button to read the terminal output.
 
-[![Demo: copy the binaries with scp, flash all boards over SSH, LEDs start breathing](docs/demo.gif)](docs/demo.mp4)
+https://github.com/user-attachments/assets/583356aa-8bc9-4474-a3e9-cf608219ec26
 
 ---
 
