@@ -66,51 +66,84 @@ Tested with one board per USB port:
 ## 2. Using `flash-all`
 
 ```
-flash-all              all probes (ST-LINK + J-Link)
-flash-all -p stlink    only ST-LINK probes
-flash-all -p jlink     only J-Link probes
-flash-all -l           only list probes, detected MCUs and the binary that would be used
-flash-all -b DIR       take the binaries from DIR
-                       (/usr/share/stm32-blinky-2x = twice the blink frequency)
-flash-all -h           help
+flash-all                    built-in blinky on every board, all probes (ST-LINK + J-Link)
+flash-all -p stlink|jlink    only one probe type
+flash-all -b DIR             images from DIR instead of the built-in blinky (e.g. -b ~/fw)
+flash-all -f FILE -t BOARD   one image on every board of that type
+flash-all -f FILE -s SERIAL  one image on one probe
+flash-all -t BOARD | -s SN   only flash these boards (combines with -b)
+flash-all -a ADDR            load address for .bin files (default 0x08000000)
+flash-all -l                 only list probes, detected MCUs and the image each would get
+flash-all -h                 help
 ```
+
+Board names: `f407disco`, `f3disco`, `l4nucleo64`, `l4nucleo32`, `c0nucleo`.
+Built-in images: `/usr/share/stm32-blinky/` (2 s period) and
+`/usr/share/stm32-blinky-2x/` (1 s).
 
 Example run:
 
 ```
-[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> blinky_f3disco.bin
-[stlink 066EFF35314B4E3043195329] 0x453 STM32C0 (Nucleo, LED PA5) -> blinky_c0nucleo.bin
-[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> blinky_f407disco.bin
-[stlink 066EFF3234584D3043012451] 0x415 STM32L47x/L48x (Nucleo-64, LD2 PA5) -> blinky_l4nucleo64.bin
+[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> /root/fw/f3disco.bin
+[stlink 066EFF35314B4E3043195329] 0x453 STM32C0 (Nucleo, LED PA5) -> /root/fw/c0nucleo.bin
+[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> /root/fw/066BFF575377524867071643.elf
+[stlink 066EFF3234584D3043012451] 0x415 STM32L47x/L48x (Nucleo-64, LD2 PA5) -> /root/fw/l4nucleo64.elf
 Flashing 4 board(s) in parallel...
 [f3disco] Memory Programming ...
 [c0nucleo] Download verified successfully
 ...
 ===== summary =====
-f407disco    stlink  066BFF575377524867071643   OK
-f3disco      stlink  066CFF494877514867173517   OK
-l4nucleo64   stlink  066EFF3234584D3043012451   OK
-c0nucleo     stlink  066EFF35314B4E3043195329   OK
+f407disco   stlink  066BFF575377524867071643  066BFF575377524867071643.elf   OK
+f3disco     stlink  066CFF494877514867173517  f3disco.bin                    OK
+l4nucleo64  stlink  066EFF3234584D3043012451  l4nucleo64.elf                 OK
+c0nucleo    stlink  066EFF35314B4E3043195329  c0nucleo.bin                   OK
 ```
 
 The exit code is non-zero if any board failed. Per-board logs of the last run
-are in `/tmp/flash-all/<serial>.log`.
+are in `/tmp/flash-all-<uid>/<serial>.log`.
 
-**Your own firmware:** put one `.bin` per board, named like the files in
-`/usr/share/stm32-blinky/`, into a directory and run `flash-all -b <dir>`. To
-flash a single board by hand:
+### Flashing your own firmware (no new SD image needed)
+
+`flash-all -b DIR` picks, for each detected board, the first match of
+
+1. `DIR/<probe serial>.{elf,hex,srec,bin}` — one specific board
+2. `DIR/<board>.{elf,hex,srec,bin}` — every board of that type
+3. `DIR/blinky_<board>.bin`
+
+Boards without a match are skipped. `.elf`, `.hex` and `.srec` carry their own
+addresses; `.bin` is written to `0x08000000` (change with `-a`). If one name
+exists in several formats (`f3disco.elf` and `f3disco.bin`), that board is
+skipped as ambiguous. The root filesystem is writable, so uploaded files stay
+across reboots.
+
+**From the PC, one command** (upload + flash, in the repo):
+
+```sh
+tools/flash-remote.sh f407disco=build/f4/app.elf l4nucleo64=build/l4/app.bin
+tools/flash-remote.sh f3disco=app.hex -- -p jlink        # options after -- go to flash-all
+tools/flash-remote.sh 066BFF575377524867071643=app.elf   # by probe serial (see flash-all -l)
+tools/flash-remote.sh -H stm32@192.168.8.1 c0nucleo=app.bin
+```
+
+It replaces `~/fw` on the Pi with the given files, sets the Pi's clock from
+the PC (the Pi has no RTC or network time), and runs `flash-all -b fw`.
+
+**By hand** — any SSH file copy works (`scp`, `sftp`, FileZilla, sshfs, …):
+
+```sh
+scp app.elf stm32flasher:fw/f407disco.elf     # or root@192.168.8.1:fw/...
+ssh stm32flasher flash-all -b fw
+ssh stm32flasher flash-all -f fw/f407disco.elf -t f407disco
+```
+
+(On images built before the SFTP server was added, use `scp -O`.)
+
+Single board without the script:
 
 ```sh
 STM32_Programmer_CLI -l                                     # list all probes
-STM32_Programmer_CLI -c port=SWD sn=<ST-LINK SN> mode=UR -d app.bin 0x08000000 -v -rst
+STM32_Programmer_CLI -c port=SWD sn=<ST-LINK SN> mode=UR -d app.elf -v -rst
 STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN>        -d app.bin 0x08000000 -v -rst
-```
-
-Copy files to the Pi with `ssh` (the image has no `sftp-server`, so `scp` does not work):
-
-```sh
-tar cf - -C mybins . | ssh root@192.168.8.1 'mkdir -p /tmp/bins && tar xf - -C /tmp/bins'
-ssh root@192.168.8.1 flash-all -b /tmp/bins
 ```
 
 ---
@@ -153,10 +186,10 @@ home directory `/root` contains just this README.
 |---|---|
 | Boot | Raspberry Pi GPU firmware `start4.elf` / `fixup4.dat` (pinned commit), boots the kernel directly |
 | Kernel | mainline Linux 6.12.94, arm64 `defconfig`, Pi 4 USB/PCIe/Ethernet built in |
-| Userspace | glibc 2.42, BusyBox (init, mdev, shell), dropbear SSH |
+| Userspace | glibc 2.42, BusyBox (init, mdev, shell), dropbear SSH, gesftpserver (SFTP for scp/sftp/sshfs) |
 | STM32CubeProgrammer | v2.23.0 Linux ARM64 **CLI** (`STM32_Programmer_CLI`) in `/opt/stm32cubeprog`. ST ships no GUI for ARM; the bundled Qt6 libraries are non-GUI modules the CLI uses internally |
 | Probe support | ST-LINK/V2, V2-1, V3 (ST driver) and SEGGER J-Link (`libjlinkarm.so` from the ST package) |
-| Binaries | `/usr/share/stm32-blinky/` (2 s breathing period), `/usr/share/stm32-blinky-2x/` (1 s) |
+| Binaries | `/usr/share/stm32-blinky/` (2 s breathing period), `/usr/share/stm32-blinky-2x/` (1 s), your uploads in `~/fw/` |
 | Flash script | `/usr/bin/flash-all` |
 
 ---
@@ -302,6 +335,7 @@ firmware/                      blinky.c + Makefile
 tools/
   build-arm-toolchain.sh       builds arm-none-eabi-gcc if none is installed
   write-sd.sh                  writes the image to an SD card
+  flash-remote.sh              uploads your images to the Pi and flashes them
 ```
 
 Not in git (`.gitignore`): `dl/`, `output/`, `buildroot-*/`, `armgcc/`,

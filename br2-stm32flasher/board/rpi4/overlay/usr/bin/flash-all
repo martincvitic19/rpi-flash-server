@@ -1,46 +1,87 @@
 #!/bin/sh
-# flash-all: program every attached STM32 board in parallel with the
-# breathing-LED blinky that matches its MCU (picked by device ID), using
-# STM32CubeProgrammer over ST-LINK and/or SEGGER J-Link probes.
+# flash-all: program every attached STM32 board in parallel, using
+# STM32CubeProgrammer over ST-LINK and/or SEGGER J-Link probes. Each board
+# gets the image that matches its MCU (picked by device ID).
 #
-#   flash-all              all probes (ST-LINK + J-Link)
-#   flash-all -p stlink    only ST-LINK probes
-#   flash-all -p jlink     only J-Link probes
-#   flash-all -l           only list probes and detected MCUs
-#   flash-all -b DIR       take the blinky binaries from DIR
-#                          (/usr/share/stm32-blinky-2x = twice the frequency)
+#   flash-all              built-in breathing-LED blinky on every board
+#   flash-all -b DIR       take images from DIR (e.g. ~/fw after an upload);
+#                          per board the first match wins:
+#                            <serial>.{elf,hex,srec,bin}
+#                            <board>.{elf,hex,srec,bin}
+#                            blinky_<board>.bin
+#   flash-all -f FILE -t BOARD   flash FILE on every board of that type
+#   flash-all -f FILE -s SERIAL  flash FILE on one probe
+#   -t BOARD / -s SERIAL   only flash these boards (also without -f)
+#   -a ADDR                load address for .bin files (default 0x08000000)
+#   -p stlink|jlink|all    which probes to use (default all)
+#   -l                     only list probes, MCUs and the image each would get
+#
+# Boards: f407disco f3disco l4nucleo64 l4nucleo32 c0nucleo
+# Built-in images: /usr/share/stm32-blinky, /usr/share/stm32-blinky-2x
 
 BIN_DIR=/usr/share/stm32-blinky
 CUBE=/opt/stm32cubeprog/bin/STM32_Programmer_CLI
-LOG_DIR=/tmp/flash-all
+LOG_DIR=/tmp/flash-all-$(id -u)
 export LC_ALL=en_US.UTF-8   # Qt inside STM32CubeProgrammer wants a UTF-8 locale
 PROBES=all
 LIST_ONLY=0
+FILE=
+ONLY_TAG=
+ONLY_SN=
+ADDR=0x08000000
 
-while getopts "p:b:lh" o; do
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+while getopts "p:b:f:t:s:a:lh" o; do
 	case $o in
 	p) PROBES=$OPTARG ;;
 	b) BIN_DIR=$OPTARG ;;
+	f) FILE=$OPTARG ;;
+	t) ONLY_TAG=$OPTARG ;;
+	s) ONLY_SN=$OPTARG ;;
+	a) ADDR=$OPTARG ;;
 	l) LIST_ONLY=1 ;;
-	*) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	h) usage ;;
+	*) usage 1 ;;
 	esac
 done
 case $PROBES in all|stlink|jlink) ;; *) echo "-p must be stlink, jlink or all"; exit 1 ;; esac
 case $BIN_DIR in /*) ;; *) BIN_DIR=$PWD/$BIN_DIR ;; esac
+if [ -n "$FILE" ]; then
+	case $FILE in /*) ;; *) FILE=$PWD/$FILE ;; esac
+	[ -f "$FILE" ] || { echo "no such file: $FILE"; exit 1; }
+	# one image only fits one MCU family, so say which boards get it
+	[ -n "$ONLY_TAG$ONLY_SN" ] || { echo "-f needs -t BOARD or -s SERIAL"; exit 1; }
+fi
 [ -x "$CUBE" ] || { echo "STM32CubeProgrammer not found at $CUBE"; exit 1; }
 
-# device ID -> "binary|description"
+# device ID -> "board|description"
 board_for_id() {
 	case $(printf '0x%03x' "$(($1 & 0xfff))") in
-	0x413) echo "blinky_f407disco.bin|STM32F405/407 (F4 Discovery, LD4 green PD12)" ;;
-	0x422) echo "blinky_f3disco.bin|STM32F303xB/C (F3 Discovery, LD7 green PE11)" ;;
-	0x415) echo "blinky_l4nucleo64.bin|STM32L47x/L48x (Nucleo-64, LD2 PA5)" ;;
-	0x462) echo "blinky_l4nucleo64.bin|STM32L45x/L46x (Nucleo-64, LD2 PA5)" ;;
-	0x435) echo "blinky_l4nucleo32.bin|STM32L43x/L44x (Nucleo-32, LD3 PB3)" ;;
-	0x464) echo "blinky_l4nucleo32.bin|STM32L41x/L42x (Nucleo-32, LD3 PB3)" ;;
-	0x453|0x493|0x44c|0x44d) echo "blinky_c0nucleo.bin|STM32C0 (Nucleo, LED PA5)" ;;
+	0x413) echo "f407disco|STM32F405/407 (F4 Discovery, LD4 green PD12)" ;;
+	0x422) echo "f3disco|STM32F303xB/C (F3 Discovery, LD7 green PE11)" ;;
+	0x415) echo "l4nucleo64|STM32L47x/L48x (Nucleo-64, LD2 PA5)" ;;
+	0x462) echo "l4nucleo64|STM32L45x/L46x (Nucleo-64, LD2 PA5)" ;;
+	0x435) echo "l4nucleo32|STM32L43x/L44x (Nucleo-32, LD3 PB3)" ;;
+	0x464) echo "l4nucleo32|STM32L41x/L42x (Nucleo-32, LD3 PB3)" ;;
+	0x453|0x493|0x44c|0x44d) echo "c0nucleo|STM32C0 (Nucleo, LED PA5)" ;;
 	*) return 1 ;;
 	esac
+}
+
+# image for a board: serial ; board -> path
+find_image() {
+	[ -n "$FILE" ] && { echo "$FILE"; return; }
+	for base in "$1" "$2"; do
+		img=$(ls "$BIN_DIR/$base".elf "$BIN_DIR/$base".hex "$BIN_DIR/$base".srec "$BIN_DIR/$base".bin 2>/dev/null)
+		case $(echo "$img" | grep -c .) in
+		0) ;;
+		1) echo "$img"; return ;;
+		*) echo "ambiguous: $(echo $img), delete all but one" >&2; return 2 ;;
+		esac
+	done
+	[ -f "$BIN_DIR/blinky_$2.bin" ] && { echo "$BIN_DIR/blinky_$2.bin"; return; }
+	return 1
 }
 
 # Print "<type> <serial>" for every probe. CubeProgrammer output is
@@ -75,24 +116,31 @@ PROBE_LIST=$(list_probes)
 n=0
 echo "$PROBE_LIST" > "$LOG_DIR/probes"
 while read -r type sn; do
+	[ -n "$ONLY_SN" ] && [ "$sn" != "$ONLY_SN" ] && continue
 	id=$(chip_id "$type" "$sn" < /dev/null)
 	if [ -z "$id" ] || ! info=$(board_for_id "$id"); then
 		echo "[$type $sn] unknown or unreachable target (device ID '${id:-none}'), skipped"
 		continue
 	fi
-	bin=$BIN_DIR/${info%%|*}
-	echo "[$type $sn] $id ${info#*|} -> $(basename "$bin")"
+	tag=${info%%|*}
+	[ -n "$ONLY_TAG" ] && [ "$tag" != "$ONLY_TAG" ] && continue
+	if ! img=$(find_image "$sn" "$tag" 2>"$LOG_DIR/err"); then
+		echo "[$type $sn] $id ${info#*|} -> $(cat "$LOG_DIR/err" | grep . || echo "no image for '$tag' in $BIN_DIR"), skipped"
+		continue
+	fi
+	echo "[$type $sn] $id ${info#*|} -> $img"
 	[ $LIST_ONLY = 1 ] && continue
-	[ -f "$bin" ] || { echo "  missing $bin, skipped"; continue; }
+	case $img in *.bin) load="$img $ADDR" ;; *) load=$img ;; esac
 	n=$((n + 1))
 	: > "$LOG_DIR/$sn.log"
-	( "$CUBE" -c $(connect_args "$type" "$sn") -d "$bin" 0x08000000 -v -rst >> "$LOG_DIR/$sn.log" 2>&1
+	( "$CUBE" -c $(connect_args "$type" "$sn") -d $load -v -rst >> "$LOG_DIR/$sn.log" 2>&1
 	  echo $? > "$LOG_DIR/$sn.rc" ) < /dev/null &
-	basename "$bin" .bin | sed 's/^blinky_//' > "$LOG_DIR/$sn.tag"
+	echo "$tag" > "$LOG_DIR/$sn.tag"
 	echo "$type" > "$LOG_DIR/$sn.type"
+	basename "$img" > "$LOG_DIR/$sn.img"
 done < "$LOG_DIR/probes"
-[ $LIST_ONLY = 1 ] && { rm -f /SEGGER_REG_HKEY_*.xml; exit 0; }
-[ $n -gt 0 ] || exit 1
+[ $LIST_ONLY = 1 ] && { rm -f /SEGGER_REG_HKEY_*.xml 2>/dev/null; exit 0; }
+[ $n -gt 0 ] || { echo "Nothing to flash"; exit 1; }
 
 echo "Flashing $n board(s) in parallel..."
 # live progress: every board's log, prefixed with its name
@@ -103,7 +151,7 @@ for f in "$LOG_DIR"/*.tag; do
 done
 while [ "$(ls "$LOG_DIR"/*.rc 2>/dev/null | wc -l)" -lt $n ]; do sleep 0.5; done
 sleep 0.5; kill $(cat "$LOG_DIR"/*.tailpid) 2>/dev/null; wait
-rm -f /SEGGER_REG_HKEY_*.xml   # the J-Link library leaves its "registry" in /
+rm -f /SEGGER_REG_HKEY_*.xml 2>/dev/null   # the J-Link library leaves its "registry" in /
 
 echo
 echo "===== summary ====="
@@ -111,6 +159,6 @@ fail=0
 for f in "$LOG_DIR"/*.tag; do
 	sn=$(basename "$f" .tag)
 	if [ "$(cat "$LOG_DIR/$sn.rc")" = 0 ]; then r=OK; else r=FAILED; fail=1; fi
-	printf '%-12s %-7s %-26s %s\n' "$(cat "$f")" "$(cat "$LOG_DIR/$sn.type")" "$sn" "$r"
+	printf '%-11s %-7s %-25s %-30s %s\n' "$(cat "$f")" "$(cat "$LOG_DIR/$sn.type")" "$sn" "$(cat "$LOG_DIR/$sn.img")" "$r"
 done
 exit $fail
