@@ -10,15 +10,21 @@ CC = $(CROSS_COMPILE)gcc
 OBJCOPY = $(CROSS_COMPILE)objcopy
 CFLAGS = -DPERIOD_MS=$(PERIOD_MS)u -Os -ffreestanding -nostdlib -Wall -Wextra -Wno-main -T link.ld -Wl,--gc-sections
 
-BOARDS = f407disco:cortex-m4 f3disco:cortex-m4 l4nucleo64:cortex-m4 l4nucleo32:cortex-m4 c0nucleo:cortex-m0plus
-all: $(foreach b,$(BOARDS),$(OUT)/blinky_$(firstword $(subst :, ,$(b))).bin)
+# <output name>:<BOARD_ macro in blinky.c>:<cpu>  ->  $(OUT)/<output name>_pwm_blinky.{elf,bin}
+BOARDS = f4discovery:F407DISCO:cortex-m4 \
+         f3discovery:F3DISCO:cortex-m4 \
+         nucleol476rg:L4NUCLEO64:cortex-m4 \
+         nucleol432kc:L4NUCLEO32:cortex-m4 \
+         nucleoc031c6:C0NUCLEO:cortex-m0plus
+field = $(word $(2),$(subst :, ,$(1)))
+all: $(foreach b,$(BOARDS),$(OUT)/$(call field,$(b),1)_pwm_blinky.bin)
 
 define board
-$(OUT)/blinky_$(1).elf: blinky.c link.ld
+$(OUT)/$(1)_pwm_blinky.elf: blinky.c link.ld
 	@mkdir -p $(OUT)
-	$(CC) -mcpu=$(2) -mthumb $(CFLAGS) -DBOARD_$(shell echo $(1) | tr a-z A-Z) -o $$@ blinky.c -lgcc
+	$(CC) -mcpu=$(3) -mthumb $(CFLAGS) -DBOARD_$(2) -o $$@ blinky.c -lgcc
 endef
-$(foreach b,$(BOARDS),$(eval $(call board,$(firstword $(subst :, ,$(b))),$(lastword $(subst :, ,$(b))))))
+$(foreach b,$(BOARDS),$(eval $(call board,$(call field,$(b),1),$(call field,$(b),2),$(call field,$(b),3))))
 
 $(OUT)/%.bin: $(OUT)/%.elf
 	$(OBJCOPY) -O binary $< $@

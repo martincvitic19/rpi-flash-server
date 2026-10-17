@@ -8,7 +8,7 @@
 #                          per board the first match wins:
 #                            <serial>.{elf,hex,srec,bin}
 #                            <board>.{elf,hex,srec,bin}
-#                            blinky_<board>.bin
+#                            <board>_pwm_blinky.{elf,hex,srec,bin}
 #   flash-all -f FILE -t BOARD   flash FILE on every board of that type
 #   flash-all -f FILE -s SERIAL  flash FILE on one probe
 #   -t BOARD / -s SERIAL   only flash these boards (also without -f)
@@ -16,7 +16,7 @@
 #   -p stlink|jlink|all    which probes to use (default all)
 #   -l                     only list probes, MCUs and the image each would get
 #
-# Boards: f407disco f3disco l4nucleo64 l4nucleo32 c0nucleo
+# Boards: f4discovery f3discovery nucleol476rg nucleol432kc nucleoc031c6
 # Built-in images: /usr/share/stm32-blinky, /usr/share/stm32-blinky-2x
 
 BIN_DIR=/usr/share/stm32-blinky
@@ -58,13 +58,13 @@ fi
 # device ID -> "board|description"
 board_for_id() {
 	case $(printf '0x%03x' "$(($1 & 0xfff))") in
-	0x413) echo "f407disco|STM32F405/407 (F4 Discovery, LD4 green PD12)" ;;
-	0x422) echo "f3disco|STM32F303xB/C (F3 Discovery, LD7 green PE11)" ;;
-	0x415) echo "l4nucleo64|STM32L47x/L48x (Nucleo-64, LD2 PA5)" ;;
-	0x462) echo "l4nucleo64|STM32L45x/L46x (Nucleo-64, LD2 PA5)" ;;
-	0x435) echo "l4nucleo32|STM32L43x/L44x (Nucleo-32, LD3 PB3)" ;;
-	0x464) echo "l4nucleo32|STM32L41x/L42x (Nucleo-32, LD3 PB3)" ;;
-	0x453|0x493|0x44c|0x44d) echo "c0nucleo|STM32C0 (Nucleo, LED PA5)" ;;
+	0x413) echo "f4discovery|STM32F405/407 (F4 Discovery, LD4 green PD12)" ;;
+	0x422) echo "f3discovery|STM32F303xB/C (F3 Discovery, LD7 green PE11)" ;;
+	0x415) echo "nucleol476rg|STM32L47x/L48x (Nucleo-64, LD2 PA5)" ;;
+	0x462) echo "nucleol476rg|STM32L45x/L46x (Nucleo-64, LD2 PA5)" ;;
+	0x435) echo "nucleol432kc|STM32L43x/L44x (Nucleo-32, LD3 PB3)" ;;
+	0x464) echo "nucleol432kc|STM32L41x/L42x (Nucleo-32, LD3 PB3)" ;;
+	0x453|0x493|0x44c|0x44d) echo "nucleoc031c6|STM32C0 (Nucleo, LED PA5)" ;;
 	*) return 1 ;;
 	esac
 }
@@ -72,7 +72,7 @@ board_for_id() {
 # image for a board: serial ; board -> path
 find_image() {
 	[ -n "$FILE" ] && { echo "$FILE"; return; }
-	for base in "$1" "$2"; do
+	for base in "$1" "$2" "$2_pwm_blinky"; do
 		img=$(ls "$BIN_DIR/$base".elf "$BIN_DIR/$base".hex "$BIN_DIR/$base".srec "$BIN_DIR/$base".bin 2>/dev/null)
 		case $(echo "$img" | grep -c .) in
 		0) ;;
@@ -80,7 +80,6 @@ find_image() {
 		*) echo "ambiguous: $(echo $img), delete all but one" >&2; return 2 ;;
 		esac
 	done
-	[ -f "$BIN_DIR/blinky_$2.bin" ] && { echo "$BIN_DIR/blinky_$2.bin"; return; }
 	return 1
 }
 
@@ -159,6 +158,6 @@ fail=0
 for f in "$LOG_DIR"/*.tag; do
 	sn=$(basename "$f" .tag)
 	if [ "$(cat "$LOG_DIR/$sn.rc")" = 0 ]; then r=OK; else r=FAILED; fail=1; fi
-	printf '%-11s %-7s %-25s %-30s %s\n' "$(cat "$f")" "$(cat "$LOG_DIR/$sn.type")" "$sn" "$(cat "$LOG_DIR/$sn.img")" "$r"
+	printf '%-13s %-7s %-25s %-30s %s\n' "$(cat "$f")" "$(cat "$LOG_DIR/$sn.type")" "$sn" "$(cat "$LOG_DIR/$sn.img")" "$r"
 done
 exit $fail

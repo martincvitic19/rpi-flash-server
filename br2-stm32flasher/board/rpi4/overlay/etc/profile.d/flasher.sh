@@ -2,18 +2,19 @@ export PATH=$PATH:/opt/stm32cubeprog/bin
 export PS1='\u@\h:\w\$ '
 cat <<'MSG'
 
-  STM32 parallel flasher (Raspberry Pi 4) - normal Linux shell (BusyBox: ls, cat, ps, top, vi, dmesg, lsusb, ...)
+  STM32 flasher (Raspberry Pi 4) - BusyBox shell: ls, cat, ps, top, vi, dmesg, lsusb, ...
 
-    flash-all                                 flash every attached board in parallel (ST-LINK + J-Link)
-    flash-all -p stlink | -p jlink            only one probe type
-    flash-all -b /usr/share/stm32-blinky-2x   twice the blink frequency
-    flash-all -l                              only list probes and detected MCUs
-    flash-all -b ~/fw                         your own images uploaded to ~/fw (<board>.elf|hex|bin)
-    flash-all -f app.elf -t f407disco         one file on every board of a type (or -s SERIAL)
-    flash-all -h                              all options; boards: f407disco f3disco l4nucleo64 l4nucleo32 c0nucleo
-    STM32_Programmer_CLI -l                   list probes manually
+    STM32_Programmer_CLI -l                                           list probes + serials
+    STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR                  connect, show MCU
+    STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR -d fw/app.bin 0x08000000 -v -rst
+    STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR -d fw/app.elf -v -rst
 
-  Binaries: /usr/share/stm32-blinky*/   Docs: ~/README.md   Logs of last run: /tmp/flash-all-<uid>/
-  Upload from a PC: scp -O app.elf stm32flasher:fw/f407disco.elf
+    flash-all                  demo PWM blinky on every attached board, in parallel
+    flash-all -b fw            images from ~/fw (<board>_pwm_blinky.bin, <board>.elf, <serial>.hex, ...)
+    flash-all -l               list probes, MCUs and the image each would get
+    flash-all -h               all options
+
+  Upload from a PC: scp -O f4discovery_pwm_blinky.bin root@192.168.8.1:fw/
+  Demo images: /usr/share/stm32-blinky/ (2 s), /usr/share/stm32-blinky-2x/ (1 s)   Docs: ~/README.md
 
 MSG
