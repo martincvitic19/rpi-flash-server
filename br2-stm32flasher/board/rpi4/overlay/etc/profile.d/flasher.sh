@@ -14,6 +14,6 @@ cat <<'MSG'
     STM32_Programmer_CLI -l                   list probes manually
 
   Binaries: /usr/share/stm32-blinky*/   Docs: ~/README.md   Logs of last run: /tmp/flash-all-<uid>/
-  Upload from a PC: scp app.elf stm32flasher:fw/f407disco.elf   (or tools/flash-remote.sh in the repo)
+  Upload from a PC: scp -O app.elf stm32flasher:fw/f407disco.elf
 
 MSG
