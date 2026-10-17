@@ -4,7 +4,7 @@
 #   make firmware   only the blinky binaries
 #   make image      only the Buildroot image (needs firmware)
 #   make menuconfig Buildroot menuconfig on the project config
-#   make release    compressed image + checksums in release/
+#   make release    compressed image + bmap + checksums in release/
 #   make clean      remove Buildroot output and firmware builds
 
 BR_VERSION   := 2026.02.3
@@ -47,7 +47,7 @@ output/.config: $(BR_DIR)/Makefile br2-stm32flasher/configs/$(DEFCONFIG)
 
 image: firmware $(CUBEPROG_ZIP) output/.config
 	$(BR_MAKE)
-	@echo; echo "Image: output/images/sdcard.img  (write it with tools/write-sd.sh /dev/sdX)"
+	@echo; echo "Image: output/images/sdcard.img (+ .bmap), write it with: sudo bmaptool copy output/images/sdcard.img /dev/sdX"
 
 menuconfig: output/.config
 	$(BR_MAKE) menuconfig
@@ -58,7 +58,8 @@ savedefconfig: output/.config
 release: image
 	mkdir -p release
 	xz -T0 -9 -k -c output/images/sdcard.img > release/stm32flasher-rpi4-sdcard.img.xz
-	cd release && sha256sum stm32flasher-rpi4-sdcard.img.xz > SHA256SUMS
+	cp output/images/sdcard.img.bmap release/stm32flasher-rpi4-sdcard.img.bmap
+	cd release && sha256sum stm32flasher-rpi4-sdcard.img.xz stm32flasher-rpi4-sdcard.img.bmap > SHA256SUMS
 	@ls -la release
 
 clean:

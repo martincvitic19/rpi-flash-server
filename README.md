@@ -1,159 +1,161 @@
-# STM32 parallel flasher — Raspberry Pi 4
+# rpi-flash-server — parallel STM32 flasher on a Raspberry Pi 4
 
-A small Buildroot Linux image for the **Raspberry Pi 4 Model B** that flashes
-several STM32 boards **at the same time** with one command, `flash-all`, using
-**STM32CubeProgrammer** over **ST-LINK** and/or **SEGGER J-Link** probes.
+## Overview
 
-As a demo it ships a "breathing LED" blinky for each supported board, so after
-one `flash-all` every board's LED fades in and out with the same rhythm.
+A small Buildroot Linux image for the **Raspberry Pi 4 Model B** that turns
+the Pi into a flashing station for STM32 boards. Every board is connected to
+the Pi over USB through its ST-LINK (or a SEGGER J-Link probe); you log in over
+SSH, copy your firmware to the Pi with `scp` and program the boards with the
+native **STM32CubeProgrammer** command-line tool, `STM32_Programmer_CLI`, one
+at a time or all at once.
+
+What is in the image:
+
+| Part | Details |
+|---|---|
+| STM32CubeProgrammer | v2.23.0 Linux ARM64 CLI, `STM32_Programmer_CLI` (on `PATH`, installed in `/opt/stm32cubeprog`) |
+| Probes | ST-LINK/V2, V2-1, V3 and SEGGER J-Link (both through STM32CubeProgrammer) |
+| `flash-all` | optional shell wrapper (`/usr/bin/flash-all`) that runs `STM32_Programmer_CLI` for every attached board in parallel and picks the right image per board by its device ID |
+| Demo firmware | a "breathing LED" blinky for each board below, same rhythm on all of them: `/usr/share/stm32-blinky/` (2 s period) and `/usr/share/stm32-blinky-2x/` (1 s) |
+| System | mainline Linux 6.12, glibc, BusyBox shell and tools, dropbear SSH; Pi firmware pinned to a fixed commit |
+| Network | `192.168.8.1` on the Ethernet port with a small DHCP server that hands out no gateway and no DNS, so a PC cabled to it keeps its own internet connection |
 
 Tested with one board per USB port:
 
-| Board | MCU | Device ID | LED | Binary |
+| Board | MCU | Device ID | LED | Demo binary |
 |---|---|---|---|---|
 | STM32F407G-DISC1 (F4 Discovery) | STM32F407VG | 0x413 | LD4 green, PD12 (TIM4_CH1) | `blinky_f407disco.bin` |
 | STM32F3DISCOVERY | STM32F303VC | 0x422 | LD7 green, PE11 (TIM1_CH2) | `blinky_f3disco.bin` |
 | NUCLEO-L476RG | STM32L476RG | 0x415 | LD2 green, PA5 (TIM2_CH1) | `blinky_l4nucleo64.bin` |
 | NUCLEO-C031C6 | STM32C031C6 | 0x453 | LD4 green, PA5 (TIM3) | `blinky_c0nucleo.bin` |
 
-`flash-all` also maps these, but they are untested:
-- STM32L45x/L46x Nucleo-64 boards (0x462).
-- L41x/L42x and L43x/L44x (0x464, 0x435), assuming a Nucleo-32 board with
-  its LED on PB3.
-- Other C0 parts (0x493, 0x44C, 0x44D).
+`STM32_Programmer_CLI` itself works with any STM32 it supports. `flash-all`
+also recognises STM32L45x/L46x (0x462), L41x–L44x Nucleo-32 boards (0x464,
+0x435) and other C0 parts (0x493, 0x44C, 0x44D), untested.
 
 ---
 
-## Contents
+## Building the image
 
-1. [Quick start (prebuilt image)](#1-quick-start-prebuilt-image)
-2. [Using `flash-all`](#2-using-flash-all)
-3. [Access and network](#3-access-and-network)
-4. [What is in the image](#4-what-is-in-the-image)
-5. [How flashing works](#5-how-flashing-works)
-6. [The blinky firmware](#6-the-blinky-firmware)
-7. [Building from source](#7-building-from-source)
-8. [Making a release](#8-making-a-release)
-9. [Repository layout](#9-repository-layout)
-10. [Licenses](#10-licenses)
-11. [Troubleshooting](#11-troubleshooting)
+You don't have to build anything: a ready image is attached to every
+[release](https://github.com/martincvitic19/rpi-flash-server/releases)
+(`stm32flasher-rpi4-sdcard.img.xz` + `.bmap`). Skip to
+[Flashing the image](#flashing-the-image) if you use that.
 
----
+### Requirements
 
-## 1. Quick start (prebuilt image)
+- Linux x86-64 PC, ~15 GB free disk, a few GB RAM. The first build takes
+  about 1.5 h on 6 cores.
+- Buildroot host packages. On Debian/Ubuntu:
+  ```sh
+  sudo apt install build-essential git rsync bc cpio unzip file wget curl python3 \
+       libncurses-dev xz-utils gcc-arm-none-eabi
+  ```
+  `gcc-arm-none-eabi` builds the demo firmware. If it is missing, `make`
+  builds an ARM toolchain into `armgcc/` with `tools/build-arm-toolchain.sh`
+  (about 15 min, once).
+- **STM32CubeProgrammer 2.23.0 for Linux ARM64.** ST's download needs a free
+  myST login, so it is not fetched automatically. Download *STM32CubeProgrammer
+  — Linux ARM64* from
+  <https://www.st.com/en/development-tools/stm32cubeprog.html> and save it as
+  `dl/cubeprog/stm32cubeprogrammer_2.23.0_arm64.deb.zip`. Its SHA-256 is
+  checked during the build.
 
-1. Download `stm32flasher-rpi4-sdcard.img.xz` from the
-   [Releases](../../releases) page. Optionally check it against `SHA256SUMS`.
-2. Write it to a micro-SD card (≥ 2 GB):
-   ```sh
-   xz -dc stm32flasher-rpi4-sdcard.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
-   ```
-   (or use Raspberry Pi Imager / balenaEtcher with the `.img.xz`).
-3. Plug the boards' ST-LINK / J-Link USB ports into the Pi. Connect the Pi's
-   Ethernet port to your PC (directly or through a USB-Ethernet adapter) and
-   power it on.
-4. Log in, either with an HDMI monitor + keyboard or over SSH:
-   ```sh
-   ssh root@192.168.8.1          # password: stm32
-   ```
-5. Run:
-   ```sh
-   flash-all
-   ```
-
----
-
-## 2. Using `flash-all`
-
-```
-flash-all                    built-in blinky on every board, all probes (ST-LINK + J-Link)
-flash-all -p stlink|jlink    only one probe type
-flash-all -b DIR             images from DIR instead of the built-in blinky (e.g. -b ~/fw)
-flash-all -f FILE -t BOARD   one image on every board of that type
-flash-all -f FILE -s SERIAL  one image on one probe
-flash-all -t BOARD | -s SN   only flash these boards (combines with -b)
-flash-all -a ADDR            load address for .bin files (default 0x08000000)
-flash-all -l                 only list probes, detected MCUs and the image each would get
-flash-all -h                 help
-```
-
-Board names: `f407disco`, `f3disco`, `l4nucleo64`, `l4nucleo32`, `c0nucleo`.
-Built-in images: `/usr/share/stm32-blinky/` (2 s period) and
-`/usr/share/stm32-blinky-2x/` (1 s).
-
-Example run:
-
-```
-[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> /root/fw/f3disco.bin
-[stlink 066EFF35314B4E3043195329] 0x453 STM32C0 (Nucleo, LED PA5) -> /root/fw/c0nucleo.bin
-[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> /root/fw/066BFF575377524867071643.elf
-[stlink 066EFF3234584D3043012451] 0x415 STM32L47x/L48x (Nucleo-64, LD2 PA5) -> /root/fw/l4nucleo64.elf
-Flashing 4 board(s) in parallel...
-[f3disco] Memory Programming ...
-[c0nucleo] Download verified successfully
-...
-===== summary =====
-f407disco   stlink  066BFF575377524867071643  066BFF575377524867071643.elf   OK
-f3disco     stlink  066CFF494877514867173517  f3disco.bin                    OK
-l4nucleo64  stlink  066EFF3234584D3043012451  l4nucleo64.elf                 OK
-c0nucleo    stlink  066EFF35314B4E3043195329  c0nucleo.bin                   OK
-```
-
-The exit code is non-zero if any board failed. Per-board logs of the last run
-are in `/tmp/flash-all-<uid>/<serial>.log`.
-
-### Flashing your own firmware (no new SD image needed)
-
-`flash-all -b DIR` picks, for each detected board, the first match of
-
-1. `DIR/<probe serial>.{elf,hex,srec,bin}` — one specific board
-2. `DIR/<board>.{elf,hex,srec,bin}` — every board of that type
-3. `DIR/blinky_<board>.bin`
-
-Boards without a match are skipped. `.elf`, `.hex` and `.srec` carry their own
-addresses; `.bin` is written to `0x08000000` (change with `-a`). If one name
-exists in several formats (`f3disco.elf` and `f3disco.bin`), that board is
-skipped as ambiguous. The root filesystem is writable, so uploaded files stay
-across reboots.
-
-**Upload from the PC** with `scp -O` (dropbear has no SFTP server; `-O`
-selects the classic scp protocol that recent OpenSSH no longer uses by default):
+### Build
 
 ```sh
-ssh stm32flasher mkdir -p fw
-scp -O app.elf stm32flasher:fw/f407disco.elf     # or root@192.168.8.1:fw/...
-ssh stm32flasher flash-all -b fw
-ssh stm32flasher flash-all -f fw/f407disco.elf -t f407disco
+git clone https://github.com/martincvitic19/rpi-flash-server.git && cd rpi-flash-server
+mkdir -p dl/cubeprog && cp ~/Downloads/stm32cubeprogrammer_2.23.0_arm64.deb.zip dl/cubeprog/
+# optional: your SSH public key for root and the stm32 user
+mkdir -p keys && cat ~/.ssh/id_ed25519.pub > keys/authorized_keys
+make
 ```
 
-Single board without the script:
+`make` downloads Buildroot 2026.02.3 LTS (the repository is a Buildroot
+`BR2_EXTERNAL` tree, not a fork), builds the demo firmware and then the image:
+`output/images/sdcard.img` and `output/images/sdcard.img.bmap`.
 
-```sh
-STM32_Programmer_CLI -l                                     # list all probes
-STM32_Programmer_CLI -c port=SWD sn=<ST-LINK SN> mode=UR -d app.elf -v -rst
-STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN>        -d app.bin 0x08000000 -v -rst
-```
-
----
-
-## 3. Access and network
-
-| What | Value |
+| Target | What it does |
 |---|---|
-| Address | `192.168.8.1` on the Pi's Ethernet port |
-| root | password `stm32` (SSH and HDMI console tty1) |
-| user `stm32` | password `stm32`, may use the probes too |
-| SSH keys | baked in only if you build the image yourself with `keys/authorized_keys` (see [§7](#7-building-from-source)) |
+| `make` | firmware + image |
+| `make firmware` | only the demo binaries (`firmware/out/`, `firmware/out-2x/`) |
+| `make menuconfig` | Buildroot configuration; then `make savedefconfig` to store it |
+| `make release` | `release/`: `stm32flasher-rpi4-sdcard.img.xz`, `.img.bmap`, `SHA256SUMS` |
+| `make clean` / `make distclean` | remove build output / also Buildroot and the local toolchain |
 
-How the Pi configures `eth0` at boot:
-- **Cabled straight to a PC:** the Pi uses `192.168.8.1/24` and runs a small
-  DHCP server (192.168.8.100–150). The server hands out **no gateway and no
-  DNS**, so the PC keeps its normal internet connection.
-- **Plugged into a LAN with a DHCP server:** the Pi takes a lease from it and
-  keeps `192.168.8.1` as a second address, without running its own DHCP server.
+After changing only the overlay (e.g. `flash-all`) or the firmware, `make`
+takes about a minute.
 
-PC side (NetworkManager): you can simply use DHCP. A profile that can never
-steal your default route or DNS, even if a different DHCP server shows up, is:
+### Making a release
+
+Build without personal keys (`mv keys keys.off`), run `make release`, then on
+<https://github.com/martincvitic19/rpi-flash-server/releases/new> create a tag
+(e.g. `v1.0`) and attach the three files from `release/`. See
+[License](#license) for what the image contains.
+
+### Repository layout
+
+```
+Makefile                         top level: downloads Buildroot, builds firmware + image
+br2-stm32flasher/                Buildroot external tree
+  configs/rpi4_stm32flasher_defconfig
+  board/rpi4/                    config.txt, cmdline.txt, genimage.cfg, kernel fragment,
+                                 post-build/post-image scripts, users
+    overlay/                     files copied into the root filesystem (flash-all, network, banner)
+  package/stm32cubeprog/         installs ST's .deb into /opt/stm32cubeprog
+  package/rpi4-bootfw/           Pi 4 GPU firmware, pinned commit + hashes
+firmware/                        demo blinky (blinky.c, link.ld, Makefile)
+tools/build-arm-toolchain.sh     builds arm-none-eabi-gcc if none is installed
+```
+
+---
+
+## Flashing the image
+
+Write the image to a micro-SD card (8 GB or larger) with
+[bmaptool](https://github.com/yoctoproject/bmaptool). It writes only the used
+blocks (about 250 MB of the 1.1 GB image) and verifies them.
+
+```sh
+sudo apt install bmap-tools
+lsblk                        # find the SD card, e.g. /dev/sdX or /dev/mmcblk0
+```
+
+Release image:
+
+```sh
+sudo bmaptool copy --bmap stm32flasher-rpi4-sdcard.img.bmap \
+     stm32flasher-rpi4-sdcard.img.xz /dev/sdX
+```
+
+Self-built image:
+
+```sh
+sudo bmaptool copy output/images/sdcard.img /dev/sdX
+```
+
+Double-check the device name: everything on it is overwritten. Put the card in
+the Pi, connect the boards over USB and the Pi's Ethernet port to your PC, and
+power it on. It is reachable after about 20 s.
+
+### Accessing Raspberry Pi over SSH
+
+The Pi is at **192.168.8.1**. Cabled straight to a PC, it gives the PC an
+address in 192.168.8.100–150 by DHCP. No gateway and no DNS are handed out, so
+the PC's internet connection is not affected. On a LAN with its own DHCP
+server, the Pi takes a lease from it and keeps 192.168.8.1 as a second address.
+
+```sh
+ssh root@192.168.8.1         # password: stm32
+ssh stm32@192.168.8.1        # unprivileged user, password: stm32, can use the probes too
+```
+
+If you built the image with `keys/authorized_keys`, key login works for both
+users. After re-flashing the card the host key changes:
+`ssh-keygen -R 192.168.8.1`. The HDMI console (tty1) accepts the same logins.
+
+To make sure the Pi link can never take over your PC's default route or DNS,
+use a static NetworkManager profile instead of DHCP:
 
 ```sh
 nmcli connection add type ethernet con-name rpi-link ifname <usb-eth-iface> \
@@ -161,199 +163,161 @@ nmcli connection add type ethernet con-name rpi-link ifname <usb-eth-iface> \
   ipv4.ignore-auto-dns yes ipv6.method link-local
 ```
 
----
+The shell is BusyBox (`ls`, `cat`, `vi`, `ps`, `dmesg`, `lsusb`, …).
 
-## 4. What is in the image
+### Transferring binaries to be flashed using scp
 
-It is a normal (small) Linux system with a shell. The usual commands come from
-BusyBox: `ls`, `cat`, `ps`, `top`, `vi`, `dmesg`, `lsusb`, `ip`, … After login
-you get a prompt like `root@stm32flasher:~#` and a short command overview. The
-home directory `/root` contains just this README.
-
-| Part | Details |
-|---|---|
-| Boot | Raspberry Pi GPU firmware `start4.elf` / `fixup4.dat` (pinned commit), boots the kernel directly |
-| Kernel | mainline Linux 6.12.94, arm64 `defconfig`, Pi 4 USB/PCIe/Ethernet built in |
-| Userspace | glibc 2.42, BusyBox (init, mdev, shell), dropbear SSH |
-| STM32CubeProgrammer | v2.23.0 Linux ARM64 **CLI** (`STM32_Programmer_CLI`) in `/opt/stm32cubeprog`. ST ships no GUI for ARM; the bundled Qt6 libraries are non-GUI modules the CLI uses internally |
-| Probe support | ST-LINK/V2, V2-1, V3 (ST driver) and SEGGER J-Link (`libjlinkarm.so` from the ST package) |
-| Binaries | `/usr/share/stm32-blinky/` (2 s breathing period), `/usr/share/stm32-blinky-2x/` (1 s), your uploads in `~/fw/` |
-| Flash script | `/usr/bin/flash-all` |
-
----
-
-## 5. How flashing works
-
-`flash-all` (`br2-stm32flasher/board/rpi4/overlay/usr/bin/flash-all`, POSIX sh):
-
-1. **Find probes.** `STM32_Programmer_CLI -l stlink-only` and `-l jlink-only`
-   list every probe and its serial number.
-2. **Identify each target.** For each probe it connects over SWD and reads the
-   MCU **device ID**, e.g. `0x413` = STM32F407.
-3. **Pick the binary** for that device ID. An unknown ID is skipped.
-4. **Flash everything in parallel.** One STM32CubeProgrammer process per board
-   writes the binary to `0x08000000`, verifies it and resets the MCU. Every
-   process opens only its own probe (`sn=…`).
-5. **Show progress live.** All logs are streamed with a `[board]` prefix, and a
-   summary prints OK/FAILED per board.
-
-Flashing four small binaries takes under 2 seconds.
-
----
-
-## 6. The blinky firmware
-
-`firmware/blinky.c` is one bare-metal source file for all boards, with no HAL.
-The binaries are 250–640 bytes.
-
-- PWM carrier: 1 kHz (timer clock 1 MHz, reload value 1000).
-- A 1 ms SysTick moves the duty cycle up and down along a quadratic ramp, so
-  the fade looks smooth. `PERIOD_MS` sets the full breathing cycle: 2000 by
-  default, 1000 for the 2× set.
-- Every board runs on its reset-default clock: HSI 16 MHz (F4), HSI 8 MHz (F3),
-  MSI 4 MHz (L4), HSISYS 12 MHz (C0). SysTick and the prescaler are derived from
-  that clock, so the timing is identical everywhere.
-- F4, F3 and L4 drive the LED pin with hardware timer PWM (alternate function).
-  On the C0 the timer generates the PWM, but the program toggles the pin from
-  the timer's update/compare flags.
+The Pi runs dropbear, which has no SFTP server, so use `scp -O` (the classic
+scp protocol; recent OpenSSH uses SFTP by default):
 
 ```sh
-make firmware                                   # both sets
-make -C firmware PERIOD_MS=500 OUT=out-4x       # any other period
+ssh root@192.168.8.1 mkdir -p fw
+scp -O build/app.elf root@192.168.8.1:fw/
+scp -O f4.hex l4.bin c0.elf root@192.168.8.1:fw/
 ```
 
-To add a board: add a `BOARD_*` block in `blinky.c` (clock, GPIO, timer), an
-entry in `firmware/Makefile`, and its device ID in `board_for_id()` in `flash-all`.
+`STM32_Programmer_CLI` takes `.elf`, `.hex`, `.srec` and `.bin`. The root
+filesystem is writable, so files in `~/fw` stay there across reboots.
 
----
+### Probing connected devices
 
-## 7. Building from source
-
-### Requirements
-
-- Linux x86-64 PC, ~15 GB free disk, a few GB RAM. The first build takes about
-  1 h on 6 cores.
-- Buildroot host packages. On Debian/Ubuntu:
-  ```sh
-  sudo apt install build-essential git rsync bc cpio unzip file wget curl python3 \
-       libncurses-dev xz-utils gcc-arm-none-eabi
-  ```
-  `gcc-arm-none-eabi` builds the blinky firmware. If it is not installed,
-  `make` runs `tools/build-arm-toolchain.sh` automatically. That builds a
-  toolchain into `armgcc/` (about 15 min, once).
-- **STM32CubeProgrammer 2.23.0 for Linux ARM64.** ST's download needs a free
-  myST login, so it is not fetched automatically. Download *STM32CubeProgrammer
-  — Linux ARM64* from
-  <https://www.st.com/en/development-tools/stm32cubeprog.html> and save it as:
-  ```
-  dl/cubeprog/stm32cubeprogrammer_2.23.0_arm64.deb.zip
-  ```
-  Its SHA-256 is checked against `br2-stm32flasher/package/stm32cubeprog/stm32cubeprog.hash`.
-
-### Build
+Each board is identified by the serial number of its probe (the ST-LINK on a
+Nucleo/Discovery board, or the J-Link). It is not printed on the board; read it
+on the Pi:
 
 ```sh
-git clone https://github.com/martincvitic19/rpi-flash-server.git && cd rpi-flash-server
-mkdir -p dl/cubeprog && cp ~/Downloads/stm32cubeprogrammer_2.23.0_arm64.deb.zip dl/cubeprog/
-# optional: SSH public keys for root and the stm32 user
-mkdir -p keys && cat ~/.ssh/id_ed25519.pub > keys/authorized_keys
-make
+STM32_Programmer_CLI -l                  # all probes
+STM32_Programmer_CLI -l stlink-only      # "ST-LINK SN : 066BFF575377524867071643"
+STM32_Programmer_CLI -l jlink-only
+cat /sys/bus/usb/devices/*/serial        # same serials, straight from USB
 ```
 
-`make` downloads Buildroot (2026.02.3 LTS), builds the firmware and then the
-image: `output/images/sdcard.img`.
-
-| Target | What it does |
-|---|---|
-| `make` | firmware + image |
-| `make firmware` | only the blinky binaries |
-| `make menuconfig` | Buildroot configuration; then `make savedefconfig` to store it |
-| `make release` | `release/stm32flasher-rpi4-sdcard.img.xz` + `SHA256SUMS` |
-| `make clean` / `make distclean` | remove build output / also Buildroot and the local toolchain |
-
-After changing only `flash-all`, the overlay or the firmware, `make` takes
-about a minute. If `LD_LIBRARY_PATH` is set in your shell, the Makefile clears
-it, because Buildroot refuses to run with it.
-
-### Write the SD card
+To see which MCU is behind a probe, connect to it. The output shows
+`Device ID`, `Device name` and the flash size:
 
 ```sh
-tools/write-sd.sh            # lists removable disks
-tools/write-sd.sh /dev/sdX   # writes output/images/sdcard.img (asks for "yes" and sudo)
+STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR
+STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN>
 ```
 
----
-
-## 8. Making a release
-
-1. Build without personal keys: move `keys/` away, so that the release image
-   only has password login.
-2. `make release`. It creates `release/stm32flasher-rpi4-sdcard.img.xz` and
-   `release/SHA256SUMS`.
-3. Tag and publish, e.g. with the GitHub CLI:
-   ```sh
-   git tag -a v1.0 -m "v1.0" && git push origin v1.0
-   gh release create v1.0 release/stm32flasher-rpi4-sdcard.img.xz release/SHA256SUMS \
-      --title "v1.0" --notes "Prebuilt Raspberry Pi 4 image, see README §1"
-   ```
-4. Read [§10](#10-licenses) first: the image contains STM32CubeProgrammer.
-
----
-
-## 9. Repository layout
+`flash-all -l` does all of this in one go and prints probe type, serial,
+device ID, board and the image it would flash:
 
 ```
-Makefile                       top-level build (download Buildroot, firmware, image, release)
-br2-stm32flasher/              Buildroot BR2_EXTERNAL tree
-  configs/rpi4_stm32flasher_defconfig
-  board/rpi4/
-    config.txt, cmdline.txt    Pi boot configuration
-    genimage.cfg               SD card layout (FAT boot + ext4 root)
-    linux.fragment             kernel options built in (PCIe, USB, Ethernet, ...)
-    post-build.sh              installs binaries, README, optional SSH keys
-    post-image.sh              assembles sdcard.img
-    users.txt                  extra user "stm32"
-    overlay/                   files copied into the root filesystem:
-      usr/bin/flash-all          the flash script
-      etc/init.d/S41eth0         network setup (static 192.168.8.1 + DHCP server)
-      etc/udhcpd.conf, etc/mdev.conf, etc/profile.d/flasher.sh
-  package/rpi4-bootfw/         Pi 4 GPU firmware, pinned commit + hashes
-  package/stm32cubeprog/       installs ST's .deb into /opt/stm32cubeprog
-firmware/                      blinky.c + Makefile
-tools/
-  build-arm-toolchain.sh       builds arm-none-eabi-gcc if none is installed
-  write-sd.sh                  writes the image to an SD card
+[stlink 066BFF575377524867071643] 0x413 STM32F405/407 (F4 Discovery, LD4 green PD12) -> /usr/share/stm32-blinky/blinky_f407disco.bin
+[stlink 066CFF494877514867173517] 0x422 STM32F303xB/C (F3 Discovery, LD7 green PE11) -> /usr/share/stm32-blinky/blinky_f3disco.bin
 ```
 
-Not in git (`.gitignore`): `dl/`, `output/`, `buildroot-*/`, `armgcc/`,
-`firmware/out*/`, `release/`, `keys/`.
+With two identical boards, unplug one and run `STM32_Programmer_CLI -l` again
+to see which serial belongs to which board.
+
+### Flashing individual images to devices
+
+With `STM32_Programmer_CLI`: `-c` selects the probe, `-d` downloads, `-v`
+verifies and `-rst` resets the MCU so the new firmware starts. `mode=UR`
+connects under reset, which works even if the running firmware disabled SWD.
+`.elf`, `.hex` and `.srec` carry their own addresses; a `.bin` needs the
+address after it.
+
+```sh
+STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/app.elf -v -rst
+STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/app.bin 0x08000000 -v -rst
+STM32_Programmer_CLI -c port=JLINK sn=<J-Link SN> -d fw/app.hex -v -rst
+```
+
+Other useful commands:
+
+```sh
+STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR -e all                         # full chip erase
+STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR -r32 0x08000000 0x100          # read memory
+STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR -u dump.bin 0x08000000 0x4000  # save flash to a file
+STM32_Programmer_CLI -c port=SWD sn=<SN> mode=UR -ob displ                      # option bytes
+STM32_Programmer_CLI --help
+```
+
+The same with `flash-all`:
+
+```sh
+flash-all -f fw/app.elf -s 066BFF575377524867071643   # one probe
+flash-all -f fw/app.elf -t f407disco                  # every board of that type
+```
+
+Board names: `f407disco`, `f3disco`, `l4nucleo64`, `l4nucleo32`, `c0nucleo`.
+
+### Flashing all connected devices
+
+`STM32_Programmer_CLI` handles one probe per process, so run one per board in
+the background and wait for all of them:
+
+```sh
+STM32_Programmer_CLI -c port=SWD sn=066BFF575377524867071643 mode=UR -d fw/f4.elf -v -rst > f4.log 2>&1 &
+STM32_Programmer_CLI -c port=SWD sn=066CFF494877514867173517 mode=UR -d fw/f3.hex -v -rst > f3.log 2>&1 &
+STM32_Programmer_CLI -c port=SWD sn=066EFF3234584D3043012451 mode=UR -d fw/l4.bin 0x08000000 -v -rst > l4.log 2>&1 &
+STM32_Programmer_CLI -c port=SWD sn=066EFF35314B4E3043195329 mode=UR -d fw/c0.bin 0x08000000 -v -rst > c0.log 2>&1 &
+wait; grep -l "verified successfully" *.log
+```
+
+`flash-all` does exactly that for every probe it finds: it reads each MCU's
+device ID, picks the matching image, starts all downloads at once, shows the
+progress of every board prefixed with its name and ends with a summary. The
+exit code is non-zero if any board failed. Logs are in
+`/tmp/flash-all-<uid>/<serial>.log`.
+
+```sh
+flash-all                                  # demo blinky on every board
+flash-all -b /usr/share/stm32-blinky-2x    # demo blinky, twice the frequency
+flash-all -b fw                            # your images from ~/fw
+flash-all -p stlink                        # only ST-LINK probes (or -p jlink)
+flash-all -h                               # all options
+```
+
+With `-b DIR`, each board gets the first match of `DIR/<probe serial>.<ext>`,
+`DIR/<board>.<ext>` (ext = `elf`, `hex`, `srec` or `bin`) or
+`DIR/blinky_<board>.bin`. Boards without a match are skipped, and so is a board
+whose name exists in more than one format. `.bin` files go to `0x08000000`
+(change with `-a ADDR`). For example:
+
+```sh
+scp -O f4.elf root@192.168.8.1:fw/f407disco.elf
+scp -O l4.bin root@192.168.8.1:fw/l4nucleo64.bin
+scp -O c0.hex root@192.168.8.1:fw/066EFF35314B4E3043195329.hex
+ssh root@192.168.8.1 flash-all -b fw
+```
+
+```
+Flashing 3 board(s) in parallel...
+[f407disco] Download verified successfully
+...
+===== summary =====
+f407disco   stlink  066BFF575377524867071643  f407disco.elf                  OK
+l4nucleo64  stlink  066EFF3234584D3043012451  l4nucleo64.bin                 OK
+c0nucleo    stlink  066EFF35314B4E3043195329  066EFF35314B4E3043195329.hex   OK
+```
+
+If a board shows `unknown or unreachable target`, check its USB cable and
+jumpers (Nucleo: both CN2 jumpers on). `No ST-LINK/J-Link probes found` means
+`lsusb` on the Pi shows no `0483:374x` (ST-LINK) or `1366:xxxx` (J-Link) device.
 
 ---
 
-## 10. Licenses
+## License
 
-- The code in this repository (Buildroot external tree, scripts, firmware) is
-  your project's license (add a `LICENSE` file).
-- Buildroot, Linux, BusyBox, glibc and dropbear keep their own licenses.
-  `make -C output legal-info` collects them.
-- **STM32CubeProgrammer** is © STMicroelectronics under license **SLA0048**.
-  Binary redistribution is allowed only under its conditions: reproduce the
-  copyright notice and license, and use it only with ST devices. It also
-  bundles third-party parts such as the SEGGER J-Link library, with their own
-  terms. The `.deb` itself is not committed to this repository. If you publish
-  a prebuilt image, include SLA0048 with the release (it is in
-  `/opt/stm32cubeprog/bin/doc/` in the image) and check the terms yourself.
-- The Raspberry Pi boot firmware is Broadcom's redistributable binary.
+The code in this repository (Buildroot external tree, scripts, demo firmware)
+is released under the [MIT No Attribution](LICENSE) license (MIT-0): use it
+for anything, no attribution required.
 
----
+The image built from it contains third-party software under its own licenses:
 
-## 11. Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| `ssh: No route to host` | wait ~20 s after power-on; give the PC an address in 192.168.8.0/24 (DHCP or static) |
-| `Host key verification failed` | the card was re-flashed: `ssh-keygen -R 192.168.8.1` |
-| a board shows `unknown or unreachable target` | check USB cable and jumpers (Nucleo: both CN2 jumpers on), then `flash-all -l` |
-| a board is found but its LED does nothing | device ID not mapped to the right board/LED: see §6 "To add a board" |
-| `No ST-LINK/J-Link probes found` | `lsusb` on the Pi must show `0483:374x` (ST-LINK) or `1366:xxxx` (J-Link) |
-| Buildroot: "current working directory in LD_LIBRARY_PATH" | use the top-level `make`, which clears it |
+- **Buildroot**, **Linux**, **BusyBox**: GPL-2.0. **glibc**: LGPL-2.1+.
+  **dropbear**: MIT-style. `make -C output legal-info` collects all license
+  texts and sources of a build.
+- **Raspberry Pi boot firmware** (`start4.elf`, `fixup4.dat`): Broadcom's
+  redistributable binary license.
+- **STM32CubeProgrammer**: © STMicroelectronics, license **SLA0048**. Binary
+  redistribution is allowed only under its conditions (keep the copyright
+  notice and license, use only with ST devices). The package is not part of
+  this repository. In the image its license is
+  `/opt/stm32cubeprog/bin/doc/license.txt`.
+- **SEGGER J-Link library** (`libjlinkarm.so`, bundled by ST in
+  STM32CubeProgrammer): SEGGER's license,
+  `/opt/stm32cubeprog/bin/doc/License_Segger_JLink.txt` in the image.
