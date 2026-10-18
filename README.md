@@ -30,8 +30,14 @@ You can either build the image yourself using Buildroot and configuring the buil
   myST login, so it is not fetched automatically. Download *STM32CubeProgrammer
   — Linux ARM64* from
   <https://www.st.com/en/development-tools/stm32cubeprog.html> and save it as
-  `dl/cubeprog/stm32cubeprogrammer_2.23.0_arm64.deb.zip`. Its SHA-256 is
-  checked during the build.
+  `dl/cubeprog/stm32cubeprogrammer_2.23.0_arm64.deb.zip` (21677359 bytes).
+  `make` checks its SHA-256 before it starts building and stops if it does
+  not match. A failed download in the browser can leave a tiny file under the
+  same name, with the real one saved as `...deb(1).zip` or similar; check with:
+  ```sh
+  sha256sum dl/cubeprog/stm32cubeprogrammer_2.23.0_arm64.deb.zip
+  # 99d2a1bfd8948f713ccae814b3038528d6a4e76e9d9d101857692a4d8da5de6f
+  ```
 
 ### Build
 

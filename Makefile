@@ -9,12 +9,13 @@ BR_VERSION   := 2026.02.3
 BR_DIR       := buildroot-$(BR_VERSION)
 BR_TARBALL   := dl/buildroot-$(BR_VERSION).tar.xz
 CUBEPROG_ZIP := dl/cubeprog/stm32cubeprogrammer_2.23.0_arm64.deb.zip
+CUBEPROG_HASH := br2-stm32flasher/package/stm32cubeprog/stm32cubeprog.hash
 DEFCONFIG    := rpi4_stm32flasher_defconfig
 
 # Buildroot refuses to run with a LD_LIBRARY_PATH containing "." or an empty entry
 BR_MAKE := env -u LD_LIBRARY_PATH $(MAKE) -C $(CURDIR)/output
 
-.PHONY: all image menuconfig savedefconfig release clean distclean
+.PHONY: all image check-cubeprog menuconfig savedefconfig release clean distclean
 
 all: image
 
@@ -33,10 +34,21 @@ $(CUBEPROG_ZIP):
 	@echo "and save it as $@"
 	@false
 
+# Same hash Buildroot checks, but before an hour of building instead of after
+check-cubeprog: $(CUBEPROG_ZIP)
+	@want=$$(awk '$$1 == "sha256" { print $$2 }' $(CUBEPROG_HASH)); \
+	got=$$(sha256sum $< | cut -d' ' -f1); \
+	[ "$$want" = "$$got" ] || { \
+		echo "$< has the wrong SHA-256 ($$(stat -c %s $<) bytes):"; \
+		echo "  expected $$want"; \
+		echo "  got      $$got"; \
+		echo "Incomplete download or another version; download it again from ST."; \
+		false; }
+
 output/.config: $(BR_DIR)/Makefile br2-stm32flasher/configs/$(DEFCONFIG)
 	env -u LD_LIBRARY_PATH $(MAKE) -C $(BR_DIR) BR2_EXTERNAL=$(CURDIR)/br2-stm32flasher O=$(CURDIR)/output $(DEFCONFIG)
 
-image: $(CUBEPROG_ZIP) output/.config
+image: check-cubeprog output/.config
 	$(BR_MAKE)
 	@echo; echo "Image: output/images/sdcard.img (+ .bmap), write it with: sudo bmaptool copy output/images/sdcard.img /dev/sdX"
 
